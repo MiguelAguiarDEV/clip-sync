@@ -1,11 +1,14 @@
+// clients/cli/main.go
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -42,6 +45,51 @@ func dialAndHello(ctx context.Context, addr, token, device string) (*websocket.C
 	return c, nil
 }
 
+func httpBaseFromWS(wsAddr string) string {
+	if strings.HasPrefix(wsAddr, "wss://") {
+		return "https://" + strings.TrimPrefix(wsAddr, "wss://")
+	}
+	if strings.HasPrefix(wsAddr, "ws://") {
+		return "http://" + strings.TrimPrefix(wsAddr, "ws://")
+	}
+	// si no trae esquema, asumimos http
+	return "http://" + wsAddr
+}
+
+func uploadFile(ctx context.Context, httpBase, path string, maxMB int) (uploadURL string, size int, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer f.Close()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(httpBase, "/")+"/upload", f)
+	if err != nil {
+		return "", 0, err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return "", 0, fmt.Errorf("upload failed: status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var out struct {
+		UploadURL string `json:"upload_url"`
+		Size      int    `json:"size"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", 0, err
+	}
+	return out.UploadURL, out.Size, nil
+}
+
 /* ---------- modes ---------- */
 
 func runListen(ctx context.Context, c *websocket.Conn) error {
@@ -66,8 +114,12 @@ func runListen(ctx context.Context, c *websocket.Conn) error {
 	}
 }
 
-func runSend(ctx context.Context, c *websocket.Conn, text string) error {
+func runSendText(ctx context.Context, c *websocket.Conn, text string) error {
 	data := []byte(text)
+	if len(data) > types.MaxInlineBytes {
+		return fmt.Errorf("text payload is %d bytes; exceeds MaxInlineBytes=%d — use --file",
+			len(data), types.MaxInlineBytes)
+	}
 	env := types.Envelope{
 		Type: "clip",
 		Clip: &types.Clip{
@@ -80,6 +132,32 @@ func runSend(ctx context.Context, c *websocket.Conn, text string) error {
 	return wsjson.Write(ctx, c, env)
 }
 
+func runSendFile(ctx context.Context, c *websocket.Conn, wsAddr, path, mime string) error {
+	base := httpBaseFromWS(wsAddr)
+	upCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	uploadURL, size, err := uploadFile(upCtx, base, path, 100)
+	if err != nil {
+		return err
+	}
+
+	env := types.Envelope{
+		Type: "clip",
+		Clip: &types.Clip{
+			MsgID:     "m-" + time.Now().UTC().Format("20060102T150405.000Z0700"),
+			Mime:      mime,
+			Size:      size,
+			UploadURL: uploadURL,
+		},
+	}
+	if err := wsjson.Write(ctx, c, env); err != nil {
+		return err
+	}
+	fmt.Printf("sent file: %s (%d bytes) url=%s\n", path, size, uploadURL)
+	return nil
+}
+
 /* ---------- main ---------- */
 
 func main() {
@@ -88,6 +166,8 @@ func main() {
 	device := flag.String("device", "A", "device id (unique per device)")
 	mode := flag.String("mode", "listen", "listen|send")
 	text := flag.String("text", "", "text to send (send mode). If empty, read from stdin")
+	file := flag.String("file", "", "path to file to send (uses HTTP /upload)")
+	mime := flag.String("mime", "application/octet-stream", "mime type for --file")
 	flag.Parse()
 
 	switch *mode {
@@ -117,16 +197,22 @@ func main() {
 		}
 		defer c.Close(websocket.StatusNormalClosure, "")
 
+		if *file != "" {
+			if err := runSendFile(context.Background(), c, *addr, *file, *mime); err != nil {
+				log.Fatal(err)
+			}
+			return
+		}
+
 		payload := strings.TrimSpace(*text)
 		if payload == "" {
 			b, _ := io.ReadAll(os.Stdin)
 			payload = strings.TrimSpace(string(b))
 		}
 		if payload == "" {
-			log.Fatal("send mode: provide --text or pipe stdin")
+			log.Fatal("send mode: provide --text or --file (or pipe stdin)")
 		}
-
-		if err := runSend(context.Background(), c, payload); err != nil {
+		if err := runSendText(context.Background(), c, payload); err != nil {
 			log.Fatal(err)
 		}
 		fmt.Println("sent")
