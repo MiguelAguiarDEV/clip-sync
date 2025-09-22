@@ -55,3 +55,8 @@ func (u *UploadServer) Upload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"upload_url":"/d/` + id + `","size":` + strconv.FormatInt(n, 10) + `}`))
 }
+
+func (u *UploadServer) Download(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id") // Go 1.22: captura {id} de la ruta
+	http.ServeFile(w, r, filepath.Join(u.Dir, id))
+}

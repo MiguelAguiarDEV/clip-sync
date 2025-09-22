@@ -3,6 +3,7 @@ package app
 import (
 	"net/http"
 
+	"clip-sync/server/internal/httpapi"
 	"clip-sync/server/internal/hub"
 	"clip-sync/server/internal/ws"
 )
@@ -25,6 +26,13 @@ func NewMux() http.Handler {
 		},
 	}
 	mux.Handle("/ws", wss)
+
+	up := &httpapi.UploadServer{
+		Dir:      "./uploads",
+		MaxBytes: 50 << 20, // 50 MB
+	}
+	mux.HandleFunc("POST /upload", up.Upload)
+	mux.HandleFunc("GET /d/{id}", up.Download)
 
 	return mux
 }
