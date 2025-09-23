@@ -1,73 +1,62 @@
-# TODO — Clip Sync
+# Roadmap → v1
 
-## ✅ Hecho
-- [x] Núcleo **Hub** (`internal/hub`): `New`, `Join`, `Broadcast` (colas por dispositivo, no bloqueante).
-- [x] Tests unitarios Hub:
-  - [x] Salta al emisor y entrega a otros.
-  - [x] No bloquea con cola llena (descarta).
-  - [x] `leave()` elimina y cierra canal.
-  - [x] Rooms aislados por `userID`.
-- [x] Wiring servidor (`internal/app`):
-  - [x] `NewMux()` con `/health` (200 "ok").
-  - [x] Ruta `/ws` registrada.
-- [x] Handler WebSocket (`internal/ws/handler.go`):
-  - [x] `websocket.Accept`, handshake **hello** (token, user, device).
-  - [x] `Auth` MVP (token == userID).
-  - [x] `Join` al Hub, writer goroutine, reader loop → `Broadcast`.
-- [x] **Tipos compartidos** movidos a `pkg/types` (Hello, Clip, Envelope, `MaxInlineBytes`).
-- [x] Test de **integración WS** (dos clientes; A envía, B recibe; A no se reenvía).
-- [x] Prueba manual con **Postman** de `/ws` y `/health`.
+## 0) Verdes actuales (checkpoint)
+- [ ] CLI: enviar texto y archivos grandes (probado manual).
+- [ ] Tests E2E: WS básico + upload+señal (UploadAndSignal).
+- [ ] Tests negativos WS: size inconsistente, clip vacío.
 
-## 🚧 Siguiente(s) inmediato(s)
-- [ ] HTTP **/upload** (POST) y **/d/{id}** (GET) en `internal/httpapi`.
-- [ ] Test E2E: subir 100KB → señal WS con `upload_url` → otro cliente descarga y verifica tamaño.
+## 1) Endurecer servidor (core)
+- [ ] Validar WS:
+  - [ ] `len(Data)==Size`, `Size<=MaxInlineBytes`, `UploadURL` obligatorio si no hay `Data`.
+  - [ ] `mime` por defecto cuando falte.
+- [ ] Rate limit por dispositivo (p.ej. token bucket simple).
+- [ ] Métricas básicas (contadores: clips, drops, conexiones).
+- [ ] Logs estructurados (request id, device, user).
+- [ ] `/healthz` mejorado (incluye métricas mínimas).
 
-## 🛠️ Robustez servidor
-- [ ] Validaciones: `size`, `mime`, respetar `MaxInlineBytes` (en WS).
-- [ ] **Ping/Pong** WS + timeouts (desconectar zombies).
-- [ ] Cierre amable (`http.Server.Shutdown`, drenaje).
-- [ ] Métricas de backpressure (drops por dispositivo) + contadores de clips.
-- [ ] **Dedup** por `msg_id`/hash (evitar reenvíos).
-- [ ] Rate limiting por dispositivo/usuario.
-- [ ] Auth mejor (token firmado/HMAC; `device_id` registrado).
-- [ ] TLS (reverse proxy o `ListenAndServeTLS`).
-- [ ] Logs estructurados + niveles.
-- [ ] `/debug/pprof`, `/healthz` listo para prod.
-- [ ] Config por flags/env (puertos, límites, dirs).
+**Aceptación:** tests E2E existentes + nuevos tests: (a) drop por rate-limit, (b) métricas expuestas (unit).
 
-## 🧪 Calidad
-- [ ] Más unit tests (carreras `leave` vs `broadcast`).
-- [ ] Fuzz de JSON (envelopes malformados).
-- [ ] Benchmarks (latencia de broadcast, presión de colas).
-- [ ] CI (GitHub Actions: lint, test, build).
+## 2) Robustez WS
+- [ ] Keep-alive (ya): ping/pong + timeout.
+- [ ] Cierre amable: `http.Server` con `Shutdown`, drenar `Hub`.
+- [ ] Deduplicación opcional por `msg_id` (cache LRU corta).
+- [ ] Backpressure visible: contador de descartes por device.
 
-## 👩‍💻 Cliente CLI (validar protocolo)
-- [ ] Workspace `go.work` (server + client).
-- [ ] Módulo `clients/cli`: comandos `listen` (recibe) y `send --text`.
-- [ ] Flags: `--addr`, `--token`, `--device`, `--mode`.
-- [ ] Reconexión exponencial.
-- [ ] Modo pipe: `echo hola | clip-sync --mode send`.
+**Aceptación:** test integración que mata y reinicia server; clientes CLI se reconectan y siguen recibiendo.
 
-## 🖥️ GUI Desktop (Fyne)
-- [ ] Ventana simple + historial.
-- [ ] Watcher de portapapeles (Win/macOS/Linux).
-- [ ] Tray icon + autostart.
-- [ ] Preferencias (servidor, token, límites).
-- [ ] Copiar al clipboard al recibir.
-- [ ] Empaquetado: .exe, .app, AppImage.
+## 3) Seguridad mínima
+- [ ] Auth mejorada: token firmado (HMAC) → `userID`, caducidad.
+- [ ] Validar `device_id` (formato; opcional: registro previo).
+- [ ] Limitar tamaño en `/upload` por config y rechazar tipos prohibidos.
 
-## 📱 Móvil (fase posterior)
-- [ ] UI básica (historial + copiar).
-- [ ] Foreground/limitaciones SO (Android/iOS).
-- [ ] Empaquetado: APK / Xcode (TestFlight).
+**Aceptación:** tests unit para verificación HMAC + test E2E con token inválido (rechazo).
 
-## 🚀 Entrega
-- [ ] GitHub Releases (binarios Win/macOS/Linux) + checksums.
-- [ ] GoReleaser (automatizar).
-- [ ] Opcional: Homebrew/Scoop/Chocolatey.
+## 4) Configuración y DX
+- [ ] Flags/env para: puertos, límites, dir uploads, log level.
+- [ ] `/debug/pprof` y (opcional) `expvar`.
+- [ ] Makefile/justfile para `build`, `test`, `run`.
 
-## 📚 Docs
-- [ ] README (arranque rápido).
-- [ ] Especificación de protocolo (hello, clip inline, clip con `upload_url`).
-- [ ] Guía cliente CLI y Postman.
-- [ ] Roadmap y contribución.
+**Aceptación:** arranque vía flags/env; documentación en README.
+
+## 5) Cliente CLI “usable”
+- [ ] Reconexión (ya): exponencial.
+- [ ] Modo pipe estable: `echo hola | clip-sync --mode send`.
+- [ ] Detección simple de mime para `--file` (por extensión).
+- [ ] Salidas limpias (logs legibles), códigos de salida coherentes.
+
+**Aceptación:** script E2E que orquesta 2 CLI + server (powershell/bash) y valida salida.
+
+## 6) Observabilidad y pruebas
+- [ ] CI (GitHub Actions): lint, `go test ./...`, build server+cli.
+- [ ] Benchmarks ligeros del Hub (latencia fan-out, drops a presión).
+- [ ] Fuzz JSON del envelope (corpus pequeño).
+
+**Aceptación:** pipeline verde; benchmark no regresa errores y reporta números.
+
+## 7) Pulido “v1”
+- [ ] Documentar protocolo (hello, clip inline, clip con `upload_url`).
+- [ ] README de arranque rápido (server + 2 CLI).
+- [ ] Ejemplos Postman.
+- [ ] Changelog v1.
+
+**Listo v1:** servidor estable, CLI funcional (texto+archivo), tests verdes, docs claras.
