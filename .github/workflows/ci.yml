@@ -2,6 +2,7 @@ name: ci
 on:
   push:
   pull_request:
+
 jobs:
   go:
     runs-on: ubuntu-latest
@@ -10,17 +11,26 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22.x"
-      - name: Cache go
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: ${{ runner.os }}-go-
-      - run: go vet ./...
-      - run: go test ./... -v
-      - run: mkdir -p bin
-      - run: go -C server build -o ../bin/server ./cmd/server
-      - run: go -C clients/cli build -o ../../bin/cli .
-      - run: ./bin/cli --help
+          cache: true
+
+      - name: Workspace sync
+        run: go work sync
+
+      # Lint + tests por módulo
+      - name: Vet server
+        run: go -C server vet ./...
+      - name: Test server
+        run: go -C server test ./... -v
+
+      - name: Vet cli
+        run: go -C clients/cli vet ./...
+
+      # Builds
+      - name: Build server
+        run: go -C server build -o ../bin/server ./cmd/server
+      - name: Build cli
+        run: go -C clients/cli build -o ../../bin/cli .
+
+      # Smoke del CLI (no tests propios)
+      - name: CLI --help
+        run: ./bin/cli --help
