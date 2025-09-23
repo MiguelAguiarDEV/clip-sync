@@ -1,199 +1,201 @@
-# Clip‑Sync
+# clip-sync
 
-Sincroniza tu portapapeles y archivos ligeros entre dispositivos usando WebSockets y HTTP.
+Cross-device clipboard sync. Go server + CLI. WebSocket signaling + HTTP uploads.
 
-> Estado: MVP en desarrollo. `/upload` y tests unitarios listos. WS básico operativo. Ver `TODO.md`.
+## Features
 
----
+* Sync text and files across your devices.
+* Inline clips or upload-by-URL for large payloads.
+* Fan-out hub per user. Sender is not echoed.
+* Minimal auth hook (MVP).
+* Unit + integration tests. GitHub Actions CI.
 
-## Índice
-
-* [Arquitectura](#arquitectura)
-* [Protocolo](#protocolo)
-* [Instalación](#instalación)
-* [Configuración](#configuración)
-* [Ejecución](#ejecución)
-* [Endpoints HTTP](#endpoints-http)
-* [WebSocket](#websocket)
-* [Cliente CLI](#cliente-cli)
-* [Seguridad](#seguridad)
-* [Pruebas](#pruebas)
-* [Roadmap](#roadmap)
-* [Licencia](#licencia)
-
----
-
-## Arquitectura
+## Repository layout
 
 ```
-┌────────────┐      HTTP /upload      ┌───────────────┐
-│  Cliente A │ ─────────────────────▶ │  Servidor     │
-│  (CLI/App) │                        │  HTTP + WS    │
-└────────────┘                        │  Hub (fanout) │
-     ▲     │        WS /ws            └───────────────┘
-     │     └───────────────────────────────────▶  ▲
-     │                                           │
-┌────────────┐                                   │
-│  Cliente B │ ◀──────────────────────────────────┘
-└────────────┘
+.
+├─ go.work                 # workspace for multi-module repo
+├─ server/                 # Go module: server
+│  ├─ cmd/server           # server entrypoint
+│  ├─ internal/
+│  │  ├─ app               # HTTP mux (routes: /health, /ws, /upload, /d/{id})
+│  │  ├─ httpapi           # upload/download handlers
+│  │  ├─ hub               # pub/sub hub (fan-out)
+│  │  └─ ws                # WebSocket handler
+│  ├─ pkg/types            # protocol envelopes
+│  └─ tests                # integration/E2E tests
+└─ clients/cli/            # Go module: CLI (MVP)
 ```
 
-* **Hub**: difunde cada *clip* a los dispositivos del mismo usuario.
-* **/ws**: canal en tiempo real para clips en línea y señales de subida.
-* **/upload**: subida de blobs cuando superan `MaxInlineBytes`.
-* **Auth MVP**: token en query que hoy equivale a `userID`.
+## Requirements
 
-Estructura de carpetas relevante:
+* Go 1.22+ (toolchain auto OK)
+* Git
 
-```
-server/
-  internal/
-    app/        # mux, wiring
-    hub/        # fan-out
-    ws/         # servidor WS
-    httpapi/    # handlers HTTP (/upload)
-cli/
-  ...           # cliente CLI (WIP)
+## Quick start
+
+### Run the server
+
+```bash
+# from repo root
+go -C server run ./cmd/server
+# listens on :8080 (dev)
 ```
 
-## Protocolo
+### Smoke test HTTP
 
-### Envelope WS (JSON)
+```bash
+# upload any file
+curl -sS -X POST --data-binary @/bin/ls \
+  -H "Content-Type: application/octet-stream" \
+  http://localhost:8080/upload
+# => {"upload_url":"/d/<id>","size":12345}
+
+# download it
+curl -sS -o /tmp/clip.bin "http://localhost:8080/d/<id>"
+```
+
+### Build binaries
+
+```bash
+# server
+go -C server build -o ../bin/server ./cmd/server
+# cli
+go -C clients/cli build -o ../../bin/cli .
+```
+
+### Windows PowerShell smoke
+
+```powershell
+$bin = "$env:TEMP\clip-sync.bin"; [IO.File]::WriteAllBytes($bin,(New-Object byte[] (100000)))
+$resp = Invoke-WebRequest "http://localhost:8080/upload" -Method POST -ContentType application/octet-stream -InFile $bin | ConvertFrom-Json
+Invoke-WebRequest ("http://localhost:8080" + $resp.upload_url) -OutFile "$env:TEMP\clip-sync-dl.bin"
+```
+
+## Protocol
+
+### WebSocket `/ws`
+
+Envelope:
 
 ```json
 {
-  "type": "clip",              // "hello" | "clip" | "ack"
-  "user_id": "u123",           // derivado del token
-  "device_id": "dev-a",
-  "msg_id": "uuid-...",        // opcional; útil para dedup
-  "mime": "text/plain",        // por defecto si falta
-  "size": 5,                    // bytes del contenido
-  "data": "aGVsbG8=",          // base64 si inline
-  "upload_url": "http://..."   // si no va inline
+  "type": "hello|clip",
+  "hello": { "token": "string", "user_id": "string", "device_id": "string" },
+  "clip": {
+    "msg_id": "string",
+    "mime": "text/plain|application/octet-stream|...",
+    "size": 123,
+    "data": "base64-optional",
+    "upload_url": "/d/<id>-optional"
+  }
 }
 ```
 
-Reglas previstas:
+Flow:
 
-* `len(data)==size` si `data` existe.
-* `size <= MaxInlineBytes` para enviar inline; si no, usar `upload_url`.
+1. Client connects and sends `hello`.
+2. Client sends `clip`:
 
-## Instalación
+   * Inline: `data` present and `size <= MaxInlineBytes`.
+   * Large: omit `data`, set `upload_url` from HTTP `/upload`, and set `size`.
+3. Server broadcasts to all devices of the same user except the sender.
 
-Requisitos: Go ≥ 1.22.
+### HTTP
+
+* `GET /health` → `200 ok`
+* `POST /upload`
+  Body: `application/octet-stream`.
+  Response:
+
+  ```json
+  { "upload_url": "/d/<id>", "size": 12345 }
+  ```
+* `GET /d/{id}` → streams the stored blob
+
+## CLI (MVP)
+
+```
+bin/cli --help
+```
+
+Planned:
+
+* `send` mode: stdin or `--file` with MIME by extension.
+* Auto reconnect with backoff.
+* Clean logs and exit codes.
+
+## Testing
+
+### Server tests
 
 ```bash
-git clone <repo>
-cd clip-sync
-go mod download
+go -C server test ./... -v
 ```
 
-## Configuración
+### Integration/E2E (in `server/tests`)
 
-Por flags o variables de entorno (WIP):
+* `upload_and_signal_test.go`
+* `integration_ws_test.go`
+* `integration_ws_too_big_test.go`
 
-* `PORT` (HTTP)
-* `WS_PORT` (opcional si se separa)
-* `UPLOAD_DIR` (por defecto `./uploads`)
-* `UPLOAD_MAX_BYTES` (por defecto `8MiB`)
-* `LOG_LEVEL` (`debug|info|warn|error`)
-* `MAX_INLINE_BYTES` (límite para `data` en WS)
+### Optional CLI smoke test
 
-## Ejecución
-
-Servidor en local:
-
-```bash
-# Desde /server
-go run ./cmd/server
-```
-
-Comprobación de salud:
-
-```bash
-curl -i http://localhost:8080/health
-```
-
-## Endpoints HTTP
-
-### `POST /upload`
-
-Sube un archivo multipart con el campo `file`.
-
-```bash
-curl -F "file=@./ejemplo.txt" http://localhost:8080/upload
-```
-
-Respuesta `201 Created`:
-
-```json
-{ "name": "<hash>.txt", "size": 100 }
-```
-
-Errores:
-
-* `413 Payload Too Large` si excede `MaxBytes`.
-* `400 Bad Request` si falta `file`.
-
-### `GET /health`
-
-Devuelve `ok`. En roadmap ampliar a métricas.
-
-## WebSocket
-
-URL:
+If present:
 
 ```
-ws://localhost:8080/ws?token=<TOKEN>&device_id=<ID>
+clients/cli/main_test.go  # builds the CLI to a temp dir and checks --help output
 ```
 
-Handshake mínimo y ejemplo con `websocat`:
+## CI
 
-```bash
-websocat "ws://localhost:8080/ws?token=u123&device_id=dev-a"
+GitHub Actions runs:
+
+* `go -C server vet ./...`
+* `go -C server test ./... -v`
+* `go -C clients/cli vet ./...`
+* Build server and CLI
+* CLI `--help` smoke
+
+## Configuration (dev defaults)
+
+* Upload dir: `./uploads`
+* Max upload size: `50 MiB`
+* WebSocket auth: MVP stub (`token == userID`)
+* Ports and limits via flags/env (WIP)
+
+## Roadmap v1 (excerpt)
+
+* WS validation: `len(data)==size`, `size<=MaxInlineBytes`, `upload_url` required if no `data`.
+* Per-device rate limiting and drop counters.
+* Keep-alive tuning, graceful shutdown, hub drain.
+* HMAC tokens with expiry. Validate `device_id`.
+* Flags/env for ports, limits, upload dir, log level.
+* Metrics, `/healthz` with stats, `pprof`.
+* CLI: pipe mode, reconnection, MIME by extension.
+* Docs: protocol spec, Postman examples, changelog.
+
+## Development notes
+
+* No root `go.mod`. Workspace uses `go.work` with `server/` and `clients/cli/`.
+* Run `go work sync` from repo root after dependency changes.
+* Prefer `go -C <module> ...` or `cd` into the module.
+
+## Make (optional)
+
+If you use GNU Make:
+
+```make
+test:
+	go test ./... -v
+# Use -C or cd to run per module
 ```
 
-Enviar un clip inline:
+## Contributing
 
-```json
-{"type":"clip","mime":"text/plain","size":5,"data":"aGVsbG8="}
-```
+* Open an issue with a minimal repro for bugs.
+* Keep PRs small and covered by tests.
 
-Recepción: todos los clientes del mismo usuario conectados al Hub.
+## License
 
-## Cliente CLI
-
-Objetivos v1:
-
-* `clip-sync send --text "hola"`
-* `clip-sync send --file ./nota.png`
-* Modo pipe: `echo hola | clip-sync --mode send`
-* Reconexión exponencial y logs limpios.
-
-## Seguridad
-
-* **Actual**: token sin firma, igual a `userID`.
-* **Roadmap**: HMAC con caducidad, validación de `device_id`, lista de tipos permitidos en `/upload`.
-
-## Pruebas
-
-Unitarias:
-
-```bash
-go test ./server/...
-```
-
-* `httpapi/upload_test.go`: casos OK, tamaño excedido, método inválido.
-
-E2E (WIP):
-
-* WS básico + `upload_url` + señalización.
-* Negativos: tamaño inconsistente, clip vacío.
-
-## Roadmap
-
-Ver [`TODO.md`](./TODO.md) para el checklist activo y criterios de aceptación.
-
-## Licencia
-
-WIP.
+MIT (to be added).
