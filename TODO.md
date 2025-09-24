@@ -15,10 +15,10 @@
 [X] Tests negativos WS: size inconsistente, clip vacío
 [X] Validaciones WS: `len(Data)==Size`, `Size<=MaxInlineBytes`, `UploadURL` si no hay `Data`
 [X] Asignar `mime` por defecto cuando falte
-[ ] Rate limit por dispositivo
-[ ] Métricas: contadores de clips, drops, conexiones
+[X] Rate limit por dispositivo
+[X] Métricas: contadores de clips, drops, conexiones
 [ ] Logs estructurados: request id, device, user
-[ ] `/healthz` con métricas mínimas
+[X] `/healthz` con métricas mínimas
 [ ] Cierre amable: `http.Server` con `Shutdown` y drenaje de `Hub`
 [ ] Deduplicación opcional por `msg_id` (LRU corta)
 [ ] Backpressure visible: contador de descartes por device
@@ -32,7 +32,7 @@
 [ ] CLI: modo pipe estable (`echo hola | clip-sync --mode send`)
 [ ] CLI: detección simple de mime por extensión
 [ ] CLI: salida limpia y códigos de salida coherentes
-[ ] CI (GitHub Actions): lint, `go test ./...`, build server+cli
+[X] CI (GitHub Actions): lint, `go test ./...`, build server+cli
 [ ] Benchmarks ligeros del Hub
 [ ] Fuzzing del envelope JSON (corpus pequeño)
 [ ] Documentar protocolo (hello, clip inline, `upload_url`)
