@@ -10,10 +10,9 @@ import (
 
 func NewMux() http.Handler {
 	mux := http.NewServeMux()
-
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+		w.Write([]byte("ok"))
 	})
 
 	h := hub.New(32)
@@ -26,12 +25,13 @@ func NewMux() http.Handler {
 			// MVP: token == userID
 			return token, true
 		},
+		MaxInlineBytes: 64 << 10, // 64 KiB
 	}
 	mux.Handle("/ws", wss)
 
 	up := &httpapi.UploadServer{
 		Dir:      "./uploads",
-		MaxBytes: 50 << 20, // 50 MiB
+		MaxBytes: 50 << 20, // 50 MB
 	}
 	mux.HandleFunc("POST /upload", up.Upload)
 	mux.HandleFunc("GET /d/{id}", up.Download)

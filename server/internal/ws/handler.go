@@ -2,8 +2,8 @@ package ws
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
+	"sync"
 	"time"
 
 	"clip-sync/server/internal/hub"
@@ -13,115 +13,148 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
-// Keep-alive / timeouts
-const (
-	pongWait    = 20 * time.Second // sin actividad de lectura en este tiempo → cerramos
-	pingEvery   = pongWait / 2     // frecuencia de pings de servidor a cliente
-	readTimeout = pongWait         // timeout por cada lectura wsjson.Read
-)
-
-// Server conecta WebSocket con el Hub y la autenticación.
 type Server struct {
-	Hub  *hub.Hub
-	Auth func(token string) (userID string, ok bool)
+	Hub            *hub.Hub
+	Auth           func(token string) (string, bool)
+	MaxInlineBytes int // límite para clips inline (bytes)
+
+	mu    sync.RWMutex
+	conns map[string]map[string]*websocket.Conn // userID -> deviceID -> conn
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// 1) Aceptar WS
-	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{})
+	// Upgrade a WebSocket
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		// Permite WebSocket moderno; sin compresión para simplicidad
+	})
 	if err != nil {
 		return
 	}
-	defer c.Close(websocket.StatusInternalError, "internal")
+	defer c.Close(websocket.StatusNormalClosure, "")
 
-	ctx := r.Context()
+	// Estado de este peer
+	var userID, deviceID string
 
-	// 1.1) Ping goroutine (keep-alive)
-	pingCtx, stopPing := context.WithCancel(ctx)
-	defer stopPing()
-	go func() {
-		t := time.NewTicker(pingEvery)
-		defer t.Stop()
-		for {
-			select {
-			case <-pingCtx.Done():
-				return
-			case <-t.C:
-				if err := c.Ping(pingCtx); err != nil {
-					c.Close(websocket.StatusPolicyViolation, "ping failed")
+	// Init mapa
+	s.mu.Lock()
+	if s.conns == nil {
+		s.conns = make(map[string]map[string]*websocket.Conn)
+	}
+	s.mu.Unlock()
+
+	// Loop de lectura
+	for {
+		var env types.Envelope
+		if err := wsjson.Read(r.Context(), c, &env); err != nil {
+			// cierre o error → cleanup
+			if userID != "" && deviceID != "" {
+				s.removeConn(userID, deviceID)
+			}
+			return
+		}
+
+		switch env.Type {
+		case "hello":
+			// Auth mínima
+			if env.Hello == nil {
+				continue
+			}
+			tok := env.Hello.Token
+			uid := env.Hello.UserID
+			dev := env.Hello.DeviceID
+			if s.Auth != nil {
+				if got, ok := s.Auth(tok); !ok || (uid != "" && got != uid) {
+					// rechazar auth
+					_ = c.Close(websocket.StatusPolicyViolation, "unauthorized")
 					return
 				}
 			}
-		}
-	}()
+			userID, deviceID = uid, dev
+			s.addConn(uid, dev, c)
 
-	// 2) Handshake: esperar "hello"
-	var env types.Envelope
-	if err := wsjson.Read(ctx, c, &env); err != nil || env.Type != "hello" || env.Hello == nil {
-		c.Close(websocket.StatusProtocolError, "need hello")
-		return
-	}
-	userID, ok := s.Auth(env.Hello.Token)
-	if !ok {
-		c.Close(websocket.StatusPolicyViolation, "auth")
-		return
-	}
-	deviceID := env.Hello.DeviceID
-	if deviceID == "" {
-		c.Close(websocket.StatusProtocolError, "need device_id")
-		return
-	}
-
-	// 3) Unirse al Hub
-	outCh, leave := s.Hub.Join(userID, deviceID)
-	defer leave()
-
-	// 4) Writer: del Hub → cliente
-	go func(ctx context.Context) {
-		for msg := range outCh {
-			_ = c.Write(ctx, websocket.MessageText, msg)
-		}
-		c.Close(websocket.StatusNormalClosure, "")
-	}(ctx)
-
-	// 5) Reader: del cliente → Hub (con validaciones y timeout por lectura)
-	for {
-		rc, cancel := context.WithTimeout(ctx, readTimeout)
-		var in types.Envelope
-		err := wsjson.Read(rc, c, &in)
-		cancel()
-		if err != nil {
-			break // cierre del cliente o timeout
-		}
-
-		if in.Type == "clip" && in.Clip != nil {
-			cl := in.Clip
-
-			// Validaciones:
-			if len(cl.Data) > 0 {
-				// Inline: tamaño consistente y límite
-				if len(cl.Data) != cl.Size {
-					continue
-				}
-				if cl.Size > types.MaxInlineBytes {
-					continue // demasiado grande para WS → usar /upload
-				}
-				if cl.Mime == "" {
-					cl.Mime = "application/octet-stream"
-				}
-			} else {
-				// Grande: debe traer URL
-				if cl.UploadURL == "" {
-					continue
-				}
+		case "clip":
+			if env.Clip == nil {
+				continue
 			}
-
-			in.Clip.From = deviceID
-			b, _ := json.Marshal(in)
-			s.Hub.Broadcast(userID, deviceID, b)
+			clip := env.Clip
+			if !s.validateClip(clip) {
+				// drop silencioso
+				continue
+			}
+			// broadcast a todos los devices del mismo usuario excepto el emisor
+			s.broadcast(userID, deviceID, types.Envelope{
+				Type: "clip",
+				Clip: clip,
+			})
+		default:
+			// desconocido → ignorar
 		}
 	}
+}
 
-	// 6) Cierre limpio
-	c.Close(websocket.StatusNormalClosure, "")
+func (s *Server) addConn(userID, deviceID string, c *websocket.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.conns[userID] == nil {
+		s.conns[userID] = make(map[string]*websocket.Conn)
+	}
+	s.conns[userID][deviceID] = c
+}
+
+func (s *Server) removeConn(userID, deviceID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if m := s.conns[userID]; m != nil {
+		delete(m, deviceID)
+		if len(m) == 0 {
+			delete(s.conns, userID)
+		}
+	}
+}
+
+func (s *Server) broadcast(userID, fromDevice string, env types.Envelope) {
+	s.mu.RLock()
+	targets := make([]*websocket.Conn, 0, 4)
+	if peers := s.conns[userID]; peers != nil {
+		for dev, c := range peers {
+			if dev == fromDevice {
+				continue
+			}
+			targets = append(targets, c)
+		}
+	}
+	s.mu.RUnlock()
+
+	// write con timeout corto
+	for _, c := range targets {
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		_ = wsjson.Write(ctx, c, env)
+		cancel()
+	}
+}
+
+// Validación de clips
+func (s *Server) validateClip(c *types.Clip) bool {
+	if c == nil {
+		return false
+	}
+	// MIME por defecto
+	if c.Mime == "" {
+		c.Mime = "application/octet-stream"
+	}
+	// Si hay datos inline, deben cuadrar y respetar límite
+	if len(c.Data) > 0 {
+		if len(c.Data) != c.Size {
+			return false
+		}
+		if s.MaxInlineBytes > 0 && c.Size > s.MaxInlineBytes {
+			return false
+		}
+		return true
+	}
+	// Sin datos inline: se requiere URL y tamaño > 0
+	if c.UploadURL == "" || c.Size <= 0 {
+		return false
+	}
+	return true
 }
