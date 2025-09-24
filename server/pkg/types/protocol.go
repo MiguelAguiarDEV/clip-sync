@@ -1,6 +1,13 @@
 package types
 
-const MaxInlineBytes = 64 * 1024
+const MaxInlineBytes = 64 << 10 // 64 KiB
+
+type Envelope struct {
+	Type  string `json:"type"`
+	From  string `json:"from,omitempty"` // deviceID del emisor
+	Hello *Hello `json:"hello,omitempty"`
+	Clip  *Clip  `json:"clip,omitempty"`
+}
 
 type Hello struct {
 	Token    string `json:"token"`
@@ -9,16 +16,9 @@ type Hello struct {
 }
 
 type Clip struct {
-	MsgID     string `json:"msg_id"`
-	Mime      string `json:"mime"`
-	Size      int    `json:"size"`
+	MsgID     string `json:"msg_id,omitempty"`
+	Mime      string `json:"mime,omitempty"`
+	Size      int    `json:"size,omitempty"`
 	Data      []byte `json:"data,omitempty"`
 	UploadURL string `json:"upload_url,omitempty"`
-	From      string `json:"from"`
-}
-
-type Envelope struct {
-	Type  string `json:"type"`
-	Hello *Hello `json:"hello,omitempty"`
-	Clip  *Clip  `json:"clip,omitempty"`
 }

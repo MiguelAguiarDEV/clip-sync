@@ -23,30 +23,23 @@ type Server struct {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Upgrade a WebSocket
-	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		// Permite WebSocket moderno; sin compresión para simplicidad
-	})
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{})
 	if err != nil {
 		return
 	}
 	defer c.Close(websocket.StatusNormalClosure, "")
 
-	// Estado de este peer
 	var userID, deviceID string
 
-	// Init mapa
 	s.mu.Lock()
 	if s.conns == nil {
 		s.conns = make(map[string]map[string]*websocket.Conn)
 	}
 	s.mu.Unlock()
 
-	// Loop de lectura
 	for {
 		var env types.Envelope
 		if err := wsjson.Read(r.Context(), c, &env); err != nil {
-			// cierre o error → cleanup
 			if userID != "" && deviceID != "" {
 				s.removeConn(userID, deviceID)
 			}
@@ -55,7 +48,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		switch env.Type {
 		case "hello":
-			// Auth mínima
 			if env.Hello == nil {
 				continue
 			}
@@ -64,7 +56,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			dev := env.Hello.DeviceID
 			if s.Auth != nil {
 				if got, ok := s.Auth(tok); !ok || (uid != "" && got != uid) {
-					// rechazar auth
 					_ = c.Close(websocket.StatusPolicyViolation, "unauthorized")
 					return
 				}
@@ -78,16 +69,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			clip := env.Clip
 			if !s.validateClip(clip) {
-				// drop silencioso
 				continue
 			}
-			// broadcast a todos los devices del mismo usuario excepto el emisor
-			s.broadcast(userID, deviceID, types.Envelope{
+			// incluir emisor
+			out := types.Envelope{
 				Type: "clip",
+				From: deviceID,
 				Clip: clip,
-			})
+			}
+			s.broadcast(userID, deviceID, out)
+
 		default:
-			// desconocido → ignorar
+			// ignorar
 		}
 	}
 }
@@ -113,19 +106,30 @@ func (s *Server) removeConn(userID, deviceID string) {
 }
 
 func (s *Server) broadcast(userID, fromDevice string, env types.Envelope) {
-	s.mu.RLock()
-	targets := make([]*websocket.Conn, 0, 4)
-	if peers := s.conns[userID]; peers != nil {
-		for dev, c := range peers {
-			if dev == fromDevice {
-				continue
+	buildTargets := func() []*websocket.Conn {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		list := make([]*websocket.Conn, 0, 4)
+		if peers := s.conns[userID]; peers != nil {
+			for dev, c := range peers {
+				if dev == fromDevice {
+					continue
+				}
+				list = append(list, c)
 			}
-			targets = append(targets, c)
 		}
+		return list
 	}
-	s.mu.RUnlock()
 
-	// write con timeout corto
+	// Primer intento
+	targets := buildTargets()
+	// Si aún no hay receptores (p. ej. B todavía no procesó su hello),
+	// espera una fracción de segundo y reintenta una vez.
+	if len(targets) == 0 {
+		time.Sleep(50 * time.Millisecond)
+		targets = buildTargets()
+	}
+
 	for _, c := range targets {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		_ = wsjson.Write(ctx, c, env)
@@ -138,11 +142,9 @@ func (s *Server) validateClip(c *types.Clip) bool {
 	if c == nil {
 		return false
 	}
-	// MIME por defecto
 	if c.Mime == "" {
 		c.Mime = "application/octet-stream"
 	}
-	// Si hay datos inline, deben cuadrar y respetar límite
 	if len(c.Data) > 0 {
 		if len(c.Data) != c.Size {
 			return false
@@ -152,7 +154,6 @@ func (s *Server) validateClip(c *types.Clip) bool {
 		}
 		return true
 	}
-	// Sin datos inline: se requiere URL y tamaño > 0
 	if c.UploadURL == "" || c.Size <= 0 {
 		return false
 	}

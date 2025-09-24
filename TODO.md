@@ -27,7 +27,7 @@
 [ ] `/upload`: permitir solo tipos aceptados
 [ ] Flags/env: puertos, límites, dir uploads, log level
 [ ] `/debug/pprof` y opcional `expvar`
-[ ] Makefile/justfile para build/test/run
+[X] Makefile/justfile para build/test/run
 [ ] CLI: reconexión exponencial
 [ ] CLI: modo pipe estable (`echo hola | clip-sync --mode send`)
 [ ] CLI: detección simple de mime por extensión

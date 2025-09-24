@@ -68,8 +68,8 @@ func TestWSBroadcastSmallClip(t *testing.T) {
 	if string(got.Clip.Data) != "hola" {
 		t.Fatalf("data=%q", got.Clip.Data)
 	}
-	if got.Clip.From != "A" {
-		t.Fatalf("from=%q", got.Clip.From)
+	if got.From != "A" {
+		t.Fatalf("from=%q", got.From)
 	}
 
 	shortCtx, cancel2 := context.WithTimeout(context.Background(), 50*time.Millisecond)
