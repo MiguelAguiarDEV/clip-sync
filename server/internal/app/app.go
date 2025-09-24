@@ -8,10 +8,16 @@ import (
 
 	"clip-sync/server/internal/httpapi"
 	"clip-sync/server/internal/hub"
+	"clip-sync/server/internal/logx"
 	"clip-sync/server/internal/ws"
 )
 
-func NewMux() http.Handler {
+type App struct {
+	Mux *http.ServeMux
+	WSS *ws.Server
+}
+
+func NewApp() *App {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -27,26 +33,34 @@ func NewMux() http.Handler {
 			}
 			return token, true
 		},
-		MaxInlineBytes:     64 << 10,                       // 64 KiB
-		RateLimitPerSecond: envInt("CLIPSYNC_RATE_LPS", 0), // 0 = ilimitado por defecto
+		MaxInlineBytes:     64 << 10,
+		RateLimitPerSecond: envInt("CLIPSYNC_RATE_LPS", 0),
+		Log: func(event string, fields map[string]any) {
+			logx.Info(event, fields)
+		},
 	}
+	// dedupe: capacidad LRU por usuario desde env (0 = off)
+	wss.SetDedupeCapacity(envInt("CLIPSYNC_DEDUPE", 128))
+
 	mux.Handle("/ws", wss)
 
 	up := &httpapi.UploadServer{
 		Dir:      "./uploads",
-		MaxBytes: 50 << 20, // 50 MB
+		MaxBytes: 50 << 20,
 	}
 	mux.HandleFunc("POST /upload", up.Upload)
 	mux.HandleFunc("GET /d/{id}", up.Download)
 
-	// /healthz con métricas
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(wss.MetricsSnapshot())
 	})
 
-	return mux
+	return &App{Mux: mux, WSS: wss}
 }
+
+// Back-compat
+func NewMux() http.Handler { return NewApp().Mux }
 
 func envInt(name string, def int) int {
 	v := os.Getenv(name)
