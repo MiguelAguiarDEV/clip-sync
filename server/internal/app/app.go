@@ -1,7 +1,10 @@
 package app
 
 import (
+	"encoding/json"
 	"net/http"
+	"os"
+	"strconv"
 
 	"clip-sync/server/internal/httpapi"
 	"clip-sync/server/internal/hub"
@@ -22,10 +25,10 @@ func NewMux() http.Handler {
 			if token == "" {
 				return "", false
 			}
-			// MVP: token == userID
 			return token, true
 		},
-		MaxInlineBytes: 64 << 10, // 64 KiB
+		MaxInlineBytes:     64 << 10,                       // 64 KiB
+		RateLimitPerSecond: envInt("CLIPSYNC_RATE_LPS", 0), // 0 = ilimitado por defecto
 	}
 	mux.Handle("/ws", wss)
 
@@ -36,5 +39,23 @@ func NewMux() http.Handler {
 	mux.HandleFunc("POST /upload", up.Upload)
 	mux.HandleFunc("GET /d/{id}", up.Download)
 
+	// /healthz con métricas
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(wss.MetricsSnapshot())
+	})
+
 	return mux
+}
+
+func envInt(name string, def int) int {
+	v := os.Getenv(name)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }

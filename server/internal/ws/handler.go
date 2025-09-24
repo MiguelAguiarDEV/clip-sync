@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"clip-sync/server/internal/hub"
@@ -13,13 +14,54 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
+type limiter struct {
+	rate     float64
+	capacity float64
+	tokens   float64
+	last     time.Time
+}
+
+func newLimiter(rps int) *limiter {
+	r := float64(rps)
+	if r <= 0 {
+		r = 1e9 // effectively unlimited
+	}
+	now := time.Now()
+	return &limiter{rate: r, capacity: r, tokens: r, last: now}
+}
+
+func (l *limiter) allow() bool {
+	now := time.Now()
+	el := now.Sub(l.last).Seconds()
+	l.last = now
+	l.tokens += el * l.rate
+	if l.tokens > l.capacity {
+		l.tokens = l.capacity
+	}
+	if l.tokens >= 1 {
+		l.tokens -= 1
+		return true
+	}
+	return false
+}
+
 type Server struct {
-	Hub            *hub.Hub
-	Auth           func(token string) (string, bool)
-	MaxInlineBytes int // límite para clips inline (bytes)
+	Hub                *hub.Hub
+	Auth               func(token string) (string, bool)
+	MaxInlineBytes     int
+	RateLimitPerSecond int
 
 	mu    sync.RWMutex
 	conns map[string]map[string]*websocket.Conn // userID -> deviceID -> conn
+
+	rlmu sync.Mutex
+	rl   map[string]*limiter // key: userID|deviceID
+
+	metrics struct {
+		clips int64 // accepted clips
+		drops int64 // dropped clips
+		conns int64 // current connections
+	}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -69,9 +111,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			clip := env.Clip
 			if !s.validateClip(clip) {
+				atomic.AddInt64(&s.metrics.drops, 1)
 				continue
 			}
-			// incluir emisor
+			if !s.allow(userID, deviceID) {
+				atomic.AddInt64(&s.metrics.drops, 1)
+				continue
+			}
+			atomic.AddInt64(&s.metrics.clips, 1)
+
 			out := types.Envelope{
 				Type: "clip",
 				From: deviceID,
@@ -80,9 +128,27 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.broadcast(userID, deviceID, out)
 
 		default:
-			// ignorar
+			// ignore
 		}
 	}
+}
+
+func (s *Server) allow(userID, deviceID string) bool {
+	if s.RateLimitPerSecond <= 0 {
+		return true
+	}
+	key := userID + "|" + deviceID
+	s.rlmu.Lock()
+	if s.rl == nil {
+		s.rl = make(map[string]*limiter)
+	}
+	lim := s.rl[key]
+	if lim == nil {
+		lim = newLimiter(s.RateLimitPerSecond)
+		s.rl[key] = lim
+	}
+	s.rlmu.Unlock()
+	return lim.allow()
 }
 
 func (s *Server) addConn(userID, deviceID string, c *websocket.Conn) {
@@ -92,13 +158,17 @@ func (s *Server) addConn(userID, deviceID string, c *websocket.Conn) {
 		s.conns[userID] = make(map[string]*websocket.Conn)
 	}
 	s.conns[userID][deviceID] = c
+	atomic.AddInt64(&s.metrics.conns, 1)
 }
 
 func (s *Server) removeConn(userID, deviceID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if m := s.conns[userID]; m != nil {
-		delete(m, deviceID)
+		if _, ok := m[deviceID]; ok {
+			delete(m, deviceID)
+			atomic.AddInt64(&s.metrics.conns, -1)
+		}
 		if len(m) == 0 {
 			delete(s.conns, userID)
 		}
@@ -121,10 +191,7 @@ func (s *Server) broadcast(userID, fromDevice string, env types.Envelope) {
 		return list
 	}
 
-	// Primer intento
 	targets := buildTargets()
-	// Si aún no hay receptores (p. ej. B todavía no procesó su hello),
-	// espera una fracción de segundo y reintenta una vez.
 	if len(targets) == 0 {
 		time.Sleep(50 * time.Millisecond)
 		targets = buildTargets()
@@ -137,7 +204,6 @@ func (s *Server) broadcast(userID, fromDevice string, env types.Envelope) {
 	}
 }
 
-// Validación de clips
 func (s *Server) validateClip(c *types.Clip) bool {
 	if c == nil {
 		return false
@@ -158,4 +224,12 @@ func (s *Server) validateClip(c *types.Clip) bool {
 		return false
 	}
 	return true
+}
+
+func (s *Server) MetricsSnapshot() map[string]int64 {
+	return map[string]int64{
+		"clips_total":   atomic.LoadInt64(&s.metrics.clips),
+		"drops_total":   atomic.LoadInt64(&s.metrics.drops),
+		"conns_current": atomic.LoadInt64(&s.metrics.conns),
+	}
 }
