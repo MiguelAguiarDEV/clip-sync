@@ -1,4 +1,3 @@
-// clients/cli/main.go
 package main
 
 import (
@@ -52,7 +51,6 @@ func httpBaseFromWS(wsAddr string) string {
 	if strings.HasPrefix(wsAddr, "ws://") {
 		return "http://" + strings.TrimPrefix(wsAddr, "ws://")
 	}
-	// si no trae esquema, asumimos http
 	return "http://" + wsAddr
 }
 
@@ -104,12 +102,12 @@ func runListen(ctx context.Context, c *websocket.Conn) error {
 		cl := env.Clip
 		if len(cl.Data) > 0 {
 			if strings.HasPrefix(cl.Mime, "text/") {
-				fmt.Printf("[from %s] %s\n", cl.From, string(cl.Data))
+				fmt.Printf("[from %s] %s\n", env.From, string(cl.Data))
 			} else {
-				fmt.Printf("[from %s] %s (%d bytes inline)\n", cl.From, cl.Mime, len(cl.Data))
+				fmt.Printf("[from %s] %s (%d bytes inline)\n", env.From, cl.Mime, len(cl.Data))
 			}
 		} else if cl.UploadURL != "" {
-			fmt.Printf("[from %s] large clip: %s (%d bytes)\n", cl.From, cl.UploadURL, cl.Size)
+			fmt.Printf("[from %s] large clip: %s (%d bytes)\n", env.From, cl.UploadURL, cl.Size)
 		}
 	}
 }
