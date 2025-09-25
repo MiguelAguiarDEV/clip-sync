@@ -17,10 +17,10 @@
 [X] Asignar `mime` por defecto cuando falte
 [X] Rate limit por dispositivo
 [X] Métricas: contadores de clips, drops, conexiones
-[ ] Logs estructurados: request id, device, user
+[X] Logs estructurados: request id, device, user
 [X] `/healthz` con métricas mínimas
-[ ] Cierre amable: `http.Server` con `Shutdown` y drenaje de `Hub`
-[ ] Deduplicación opcional por `msg_id` (LRU corta)
+[X] Cierre amable: `http.Server` con `Shutdown` y drenaje de `Hub`
+[X] Deduplicación opcional por `msg_id` (LRU corta)
 [ ] Backpressure visible: contador de descartes por device
 [ ] Auth HMAC firmado → `userID` + caducidad
 [ ] Validar `device_id` (formato; opcional registro)
