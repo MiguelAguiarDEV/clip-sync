@@ -101,6 +101,10 @@ type Server struct {
 		drops int64
 		conns int64
 	}
+
+	// backpressure visible: drops por device (userID|deviceID)
+	dropsMu        sync.Mutex
+	dropsByDevice  map[string]int64
 }
 
 func (s *Server) SetDedupeCapacity(n int) {
@@ -268,16 +272,16 @@ func (s *Server) removeConn(userID, deviceID string) {
 }
 
 func (s *Server) broadcast(userID, fromDevice string, env types.Envelope) {
-	buildTargets := func() []*websocket.Conn {
+	buildTargets := func() [][2]interface{} {
 		s.mu.RLock()
 		defer s.mu.RUnlock()
-		list := make([]*websocket.Conn, 0, 4)
+		list := make([][2]interface{}, 0, 4)
 		if peers := s.conns[userID]; peers != nil {
 			for dev, c := range peers {
 				if dev == fromDevice {
 					continue
 				}
-				list = append(list, c)
+				list = append(list, [2]interface{}{dev, c})
 			}
 		}
 		return list
@@ -289,11 +293,30 @@ func (s *Server) broadcast(userID, fromDevice string, env types.Envelope) {
 		targets = buildTargets()
 	}
 
-	for _, c := range targets {
+	for _, pair := range targets {
+		dev := pair[0].(string)
+		c := pair[1].(*websocket.Conn)
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-		_ = wsjson.Write(ctx, c, env)
+		if err := wsjson.Write(ctx, c, env); err != nil {
+			// contar como drop por backpressure/error de escritura
+			atomic.AddInt64(&s.metrics.drops, 1)
+			s.incDeviceDrop(userID, dev)
+			s.log("ws_drop_backpressure", map[string]any{
+				"user_id": userID, "device_id": dev, "error": err.Error(),
+			})
+		}
 		cancel()
 	}
+}
+
+func (s *Server) incDeviceDrop(userID, deviceID string) {
+	key := userID + "|" + deviceID
+	s.dropsMu.Lock()
+	if s.dropsByDevice == nil {
+		s.dropsByDevice = make(map[string]int64, 8)
+	}
+	s.dropsByDevice[key]++
+	s.dropsMu.Unlock()
 }
 
 func (s *Server) validateClip(c *types.Clip) bool {
@@ -319,11 +342,18 @@ func (s *Server) validateClip(c *types.Clip) bool {
 }
 
 func (s *Server) MetricsSnapshot() map[string]int64 {
-	return map[string]int64{
+	m := map[string]int64{
 		"clips_total":   atomic.LoadInt64(&s.metrics.clips),
 		"drops_total":   atomic.LoadInt64(&s.metrics.drops),
 		"conns_current": atomic.LoadInt64(&s.metrics.conns),
 	}
+	// incluir drops por device de forma plana, para mantener tipo map[string]int64
+	s.dropsMu.Lock()
+	for k, v := range s.dropsByDevice {
+		m["drops_device:"+k] = v
+	}
+	s.dropsMu.Unlock()
+	return m
 }
 
 // Graceful shutdown

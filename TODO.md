@@ -21,7 +21,7 @@
 [X] `/healthz` con métricas mínimas
 [X] Cierre amable: `http.Server` con `Shutdown` y drenaje de `Hub`
 [X] Deduplicación opcional por `msg_id` (LRU corta)
-[ ] Backpressure visible: contador de descartes por device
+[X] Backpressure visible: contador de descartes por device
 [ ] Auth HMAC firmado → `userID` + caducidad
 [ ] Validar `device_id` (formato; opcional registro)
 [ ] `/upload`: permitir solo tipos aceptados
