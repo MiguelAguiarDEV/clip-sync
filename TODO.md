@@ -27,7 +27,7 @@
 - [X] Auth HMAC firmado → `userID` + caducidad
 
 - [X] Validar `device_id` (formato; opcional registro)
-- [ ] `/upload`: permitir solo tipos aceptados
+- [X] `/upload`: permitir solo tipos aceptados
 - [X] Flags/env: puertos, límites, dir uploads, log level
 - [ ] `/debug/pprof` y opcional `expvar`
 

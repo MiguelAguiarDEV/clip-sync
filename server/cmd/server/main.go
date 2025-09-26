@@ -26,6 +26,7 @@ func main() {
     addr := flag.String("addr", envOr("CLIPSYNC_ADDR", ":8080"), "listen address, e.g. :8080 or 127.0.0.1:8080")
     uploadDir := flag.String("upload-dir", envOr("CLIPSYNC_UPLOAD_DIR", "./uploads"), "directory for uploaded files")
     uploadMax := flag.Int("upload-max-bytes", func() int { if v := os.Getenv("CLIPSYNC_UPLOAD_MAXBYTES"); v != "" { if n, err := strconv.Atoi(v); err == nil { return n } }; return 50 << 20 }(), "max bytes accepted by /upload")
+    uploadAllowed := flag.String("upload-allowed", envOr("CLIPSYNC_UPLOAD_ALLOWED", ""), "comma-separated list of allowed MIME types (e.g. text/plain,image/*). Empty disables whitelist")
     inlineMax := flag.Int("inline-max-bytes", func() int { if v := os.Getenv("CLIPSYNC_INLINE_MAXBYTES"); v != "" { if n, err := strconv.Atoi(v); err == nil { return n } }; return 64 << 10 }(), "max inline clip size")
     logLevel := flag.String("log-level", envOr("CLIPSYNC_LOG_LEVEL", "info"), "log level: debug|info|error|off")
     flag.Parse()
@@ -34,6 +35,7 @@ func main() {
     _ = os.Setenv("CLIPSYNC_UPLOAD_DIR", *uploadDir)
     _ = os.Setenv("CLIPSYNC_UPLOAD_MAXBYTES", fmt.Sprintf("%d", *uploadMax))
     _ = os.Setenv("CLIPSYNC_INLINE_MAXBYTES", fmt.Sprintf("%d", *inlineMax))
+    _ = os.Setenv("CLIPSYNC_UPLOAD_ALLOWED", *uploadAllowed)
     _ = os.Setenv("CLIPSYNC_LOG_LEVEL", *logLevel)
 
     a := app.NewApp()

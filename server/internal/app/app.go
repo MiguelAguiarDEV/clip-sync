@@ -61,6 +61,7 @@ func NewApp() *App {
     up := &httpapi.UploadServer{
         Dir:      envStr("CLIPSYNC_UPLOAD_DIR", "./uploads"),
         MaxBytes: int64(envInt("CLIPSYNC_UPLOAD_MAXBYTES", 50<<20)),
+        Allowed:  splitCSV(envStr("CLIPSYNC_UPLOAD_ALLOWED", "")),
     }
     mux.HandleFunc("POST /upload", up.Upload)
     mux.HandleFunc("GET /d/{id}", up.Download)
@@ -94,6 +95,21 @@ func envStr(name, def string) string {
         return def
     }
     return v
+}
+
+func splitCSV(s string) []string {
+    if s == "" {
+        return nil
+    }
+    parts := strings.Split(s, ",")
+    out := make([]string, 0, len(parts))
+    for _, p := range parts {
+        p = strings.TrimSpace(p)
+        if p != "" {
+            out = append(out, p)
+        }
+    }
+    return out
 }
 
 // verifyHMACToken valida tokens con formato: userID:exp_unix:hex(hmac_sha256(secret, userID|exp_unix))
