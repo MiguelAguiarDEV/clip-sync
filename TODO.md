@@ -26,9 +26,9 @@
 - [X] Backpressure visible: contador de descartes por device
 - [X] Auth HMAC firmado → `userID` + caducidad
 
-- [ ] Validar `device_id` (formato; opcional registro)
+- [X] Validar `device_id` (formato; opcional registro)
 - [ ] `/upload`: permitir solo tipos aceptados
-- [ ] Flags/env: puertos, límites, dir uploads, log level
+- [X] Flags/env: puertos, límites, dir uploads, log level
 - [ ] `/debug/pprof` y opcional `expvar`
 
 - [X] Makefile/justfile para build/test/run
