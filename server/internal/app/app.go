@@ -23,13 +23,17 @@ type App struct {
 }
 
 func NewApp() *App {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	})
+    mux := http.NewServeMux()
+    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+        w.Write([]byte("ok"))
+    })
 
-	h := hub.New(32)
+    h := hub.New(32)
+    // configurar nivel de logs
+    if lvl := os.Getenv("CLIPSYNC_LOG_LEVEL"); lvl != "" {
+        logx.SetLevel(lvl)
+    }
     wss := &ws.Server{
         Hub: h,
         Auth: func(token string) (string, bool) {
@@ -43,23 +47,23 @@ func NewApp() *App {
             }
             return verifyHMACToken(token, secret)
         },
-        MaxInlineBytes:     64 << 10,
+        MaxInlineBytes:     envInt("CLIPSYNC_INLINE_MAXBYTES", 64<<10),
         RateLimitPerSecond: envInt("CLIPSYNC_RATE_LPS", 0),
         Log: func(event string, fields map[string]any) {
             logx.Info(event, fields)
         },
-	}
+    }
 	// dedupe: capacidad LRU por usuario desde env (0 = off)
 	wss.SetDedupeCapacity(envInt("CLIPSYNC_DEDUPE", 128))
 
 	mux.Handle("/ws", wss)
 
-	up := &httpapi.UploadServer{
-		Dir:      "./uploads",
-		MaxBytes: 50 << 20,
-	}
-	mux.HandleFunc("POST /upload", up.Upload)
-	mux.HandleFunc("GET /d/{id}", up.Download)
+    up := &httpapi.UploadServer{
+        Dir:      envStr("CLIPSYNC_UPLOAD_DIR", "./uploads"),
+        MaxBytes: int64(envInt("CLIPSYNC_UPLOAD_MAXBYTES", 50<<20)),
+    }
+    mux.HandleFunc("POST /upload", up.Upload)
+    mux.HandleFunc("GET /d/{id}", up.Download)
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -82,6 +86,14 @@ func envInt(name string, def int) int {
         return def
     }
     return n
+}
+
+func envStr(name, def string) string {
+    v := os.Getenv(name)
+    if v == "" {
+        return def
+    }
+    return v
 }
 
 // verifyHMACToken valida tokens con formato: userID:exp_unix:hex(hmac_sha256(secret, userID|exp_unix))

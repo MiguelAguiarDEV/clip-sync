@@ -1,3 +1,4 @@
 bin/
 **/uploads/
 *.exe
+server/server
