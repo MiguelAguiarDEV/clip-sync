@@ -22,7 +22,7 @@
 [X] Cierre amable: `http.Server` con `Shutdown` y drenaje de `Hub`
 [X] Deduplicación opcional por `msg_id` (LRU corta)
 [X] Backpressure visible: contador de descartes por device
-[ ] Auth HMAC firmado → `userID` + caducidad
+[X] Auth HMAC firmado → `userID` + caducidad
 [ ] Validar `device_id` (formato; opcional registro)
 [ ] `/upload`: permitir solo tipos aceptados
 [ ] Flags/env: puertos, límites, dir uploads, log level
