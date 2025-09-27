@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unicode/utf8"
 	"time"
 
@@ -132,6 +133,99 @@ func runListen(ctx context.Context, c *websocket.Conn) error {
 	}
 }
 
+// runRecvApply listens and applies incoming text clips to the OS clipboard.
+func runRecvApply(ctx context.Context, c *websocket.Conn, wsAddr string, markRemote func(hash string)) error {
+    base := httpBaseFromWS(wsAddr)
+    for {
+        var env types.Envelope
+        if err := wsjson.Read(ctx, c, &env); err != nil {
+            return err
+        }
+        if env.Type != "clip" || env.Clip == nil {
+            continue
+        }
+        cl := env.Clip
+        if strings.HasPrefix(strings.ToLower(cl.Mime), "text/") {
+            var data []byte
+            if len(cl.Data) > 0 {
+                data = cl.Data
+            } else if cl.UploadURL != "" {
+                u := strings.TrimRight(base, "/") + cl.UploadURL
+                req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+                resp, err := http.DefaultClient.Do(req)
+                if err != nil {
+                    fmt.Fprintln(os.Stderr, "download failed:", err)
+                    continue
+                }
+                b, _ := io.ReadAll(resp.Body)
+                resp.Body.Close()
+                if resp.StatusCode != http.StatusOK {
+                    fmt.Fprintf(os.Stderr, "download failed: status=%d\n", resp.StatusCode)
+                    continue
+                }
+                data = b
+            }
+            if len(data) == 0 {
+                continue
+            }
+            if err := setClipboardText(string(data)); err != nil {
+                fmt.Fprintln(os.Stderr, "set clipboard failed:", err)
+                continue
+            }
+            markRemote(hashBytes(data))
+            fmt.Println("clipboard updated from", env.From)
+        } else {
+            // non-text: skip for v1
+            fmt.Printf("[from %s] non-text clip: %s (%d bytes)\n", env.From, cl.Mime, cl.Size)
+        }
+    }
+}
+
+// runWatchLoop polls the clipboard and sends updates. Uses lastRemote to avoid echo.
+func runWatchLoop(ctx context.Context, c *websocket.Conn, wsAddr string, interval time.Duration, lastRemote func() string, clearRemote func()) error {
+    ticker := time.NewTicker(interval)
+    defer ticker.Stop()
+    var lastLocal string
+    for {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        case <-ticker.C:
+            txt, err := getClipboardText()
+            if err != nil {
+                return err
+            }
+            h := hashString(txt)
+            if lr := lastRemote(); lr != "" && lr == h {
+                clearRemote()
+                lastLocal = h
+                continue
+            }
+            if h == lastLocal || txt == "" {
+                continue
+            }
+            data := []byte(txt)
+            if len(data) <= types.MaxInlineBytes {
+                if err := runSendText(ctx, c, txt); err != nil {
+                    fmt.Fprintln(os.Stderr, "send text failed:", err)
+                    continue
+                }
+            } else {
+                tmp, err := os.CreateTemp("", "clipsync-*.txt")
+                if err != nil { fmt.Fprintln(os.Stderr, "tmp file error:", err); continue }
+                tmpPath := tmp.Name()
+                _, _ = tmp.Write(data)
+                _ = tmp.Close()
+                if err := runSendFile(ctx, c, wsAddr, tmpPath, "text/plain"); err != nil {
+                    fmt.Fprintln(os.Stderr, "send file failed:", err)
+                }
+                _ = os.Remove(tmpPath)
+            }
+            lastLocal = h
+        }
+    }
+}
+
 func runSendText(ctx context.Context, c *websocket.Conn, text string) error {
 	data := []byte(text)
 	if len(data) > types.MaxInlineBytes {
@@ -185,11 +279,12 @@ func main() {
 	addr := flag.String("addr", "ws://localhost:8080/ws", "WebSocket endpoint")
 	token := flag.String("token", "u1", "user token (MVP: token == userID)")
 	device := flag.String("device", "A", "device id (unique per device)")
-	mode := flag.String("mode", "listen", "listen|send")
-	text := flag.String("text", "", "text to send (send mode). If empty, read from stdin")
-	file := flag.String("file", "", "path to file to send (uses HTTP /upload)")
-	mime := flag.String("mime", "", "mime type for --file (auto-detect if empty)")
-	flag.Parse()
+    mode := flag.String("mode", "listen", "listen|send|recv|watch|sync")
+    text := flag.String("text", "", "text to send (send mode). If empty, read from stdin")
+    file := flag.String("file", "", "path to file to send (uses HTTP /upload)")
+    mime := flag.String("mime", "", "mime type for --file (auto-detect if empty)")
+    poll := flag.Int("poll-ms", 400, "clipboard poll interval for watch/sync")
+    flag.Parse()
 
 	switch *mode {
 	case "listen":
@@ -268,9 +363,85 @@ func main() {
 
 		fatalf(exitUsage, "send mode: provide --text or --file (or pipe stdin)")
 
-	default:
-        fatalf(exitUsage, "unknown -mode=%q (use listen|send)", *mode)
+    default:
+        switch *mode {
+        case "recv":
+            var c *websocket.Conn
+            var err error
+            for attempt := 0; attempt < 5; attempt++ {
+                ct, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+                c, err = dialAndHello(ct, *addr, *token, *device)
+                cancel()
+                if err == nil { break }
+                if attempt == 4 { fatalf(exitConn, "connect failed: %v", err) }
+                fmt.Fprintln(os.Stderr, "connect failed:", err)
+                sleepBackoff(attempt)
+            }
+            defer c.Close(websocket.StatusNormalClosure, "")
+            // recv-only does not need local echo prevention state
+            mark := func(string){}
+            if err := runRecvApply(context.Background(), c, *addr, mark); err != nil {
+                fatalf(exitSend, "%v", err)
+            }
+        case "watch":
+            var c *websocket.Conn
+            var err error
+            for attempt := 0; attempt < 5; attempt++ {
+                ct, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+                c, err = dialAndHello(ct, *addr, *token, *device)
+                cancel()
+                if err == nil { break }
+                if attempt == 4 { fatalf(exitConn, "connect failed: %v", err) }
+                fmt.Fprintln(os.Stderr, "connect failed:", err)
+                sleepBackoff(attempt)
+            }
+            defer c.Close(websocket.StatusNormalClosure, "")
+            var mu sync.Mutex
+            lr := ""
+            getLR := func() string { mu.Lock(); defer mu.Unlock(); return lr }
+            clearLR := func(){ mu.Lock(); lr = ""; mu.Unlock() }
+            if err := runWatchLoop(context.Background(), c, *addr, time.Duration(*poll)*time.Millisecond, getLR, clearLR); err != nil {
+                fatalf(exitSend, "%v", err)
+            }
+        case "sync":
+            var c *websocket.Conn
+            var err error
+            for attempt := 0; attempt < 5; attempt++ {
+                ct, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+                c, err = dialAndHello(ct, *addr, *token, *device)
+                cancel()
+                if err == nil { break }
+                if attempt == 4 { fatalf(exitConn, "connect failed: %v", err) }
+                fmt.Fprintln(os.Stderr, "connect failed:", err)
+                sleepBackoff(attempt)
+            }
+            defer c.Close(websocket.StatusNormalClosure, "")
+            var mu sync.Mutex
+            lr := ""
+            getLR := func() string { mu.Lock(); defer mu.Unlock(); return lr }
+            clearLR := func(){ mu.Lock(); lr = ""; mu.Unlock() }
+            mark := func(h string){ mu.Lock(); lr = h; mu.Unlock() }
+            ctx := context.Background()
+            go func(){ _ = runRecvApply(ctx, c, *addr, mark) }()
+            if err := runWatchLoop(ctx, c, *addr, time.Duration(*poll)*time.Millisecond, getLR, clearLR); err != nil {
+                fatalf(exitSend, "%v", err)
+            }
+        default:
+            fatalf(exitUsage, "unknown -mode=%q (use listen|send|recv|watch|sync)", *mode)
+        }
     }
+}
+
+// hashing helpers for dedupe
+func hashString(s string) string { return hashBytes([]byte(s)) }
+func hashBytes(b []byte) string {
+    var x uint64 = 1469598103934665603
+    const prime = 1099511628211
+    for _, c := range b { x ^= uint64(c); x *= prime }
+    const hexdigits = "0123456789abcdef"
+    out := make([]byte, 16)
+    for i := 15; i >= 0; i-- { out[i] = hexdigits[x&0xF]; x >>= 4 }
+    return string(out)
 }
 
 // isInputFromPipe returns true if stdin is not a TTY/character device (i.e., data is being piped).

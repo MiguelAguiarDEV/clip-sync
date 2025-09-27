@@ -115,17 +115,22 @@ Flow:
   ```
 * `GET /d/{id}` → streams the stored blob
 
-## CLI (MVP)
+## CLI
 
 ```
 bin/cli --help
 ```
 
-Planned:
+Modes:
+- `listen`: prints incoming clips (debug).
+- `send`: sends `--text`, `--file`, o stdin (pipe estable).
+- `recv`: aplica clips entrantes al portapapeles (text/*).
+- `watch`: monitorea portapapeles local y publica (text/*) con `--poll-ms`.
+- `sync`: combina `watch` + `recv` en un solo proceso (recomendado).
 
-* `send` mode: stdin or `--file` with MIME by extension.
-* Auto reconnect with backoff.
-* Clean logs and exit codes.
+Dependencias de portapapeles:
+- Windows: PowerShell (Get-Clipboard / Set-Clipboard) — ya incluido.
+- Linux: instala `wl-clipboard` (Wayland) o `xclip`/`xsel` (X11).
 
 ## Testing
 

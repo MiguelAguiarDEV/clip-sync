@@ -47,8 +47,8 @@
 - [X] Colección Postman
 - [X] Changelog v1
 
-- [ ] CLI: `watch` monitorea portapapeles y publica por WS
-- [ ] CLI: `recv` aplica clips entrantes al portapapeles
-- [ ] Clips grandes: subir a `/upload` en `watch` y descargar en `recv`
+- [X] CLI: `watch` monitorea portapapeles y publica por WS
+- [X] CLI: `recv` aplica clips entrantes al portapapeles
+- [X] Clips grandes: subir a `/upload` en `watch` y descargar en `recv`
 - [ ] Deduplicación por `msg_id` en server y cliente
 - [ ] Binarios para Windows, macOS y Linux
