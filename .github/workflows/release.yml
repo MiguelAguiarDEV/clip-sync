@@ -1,49 +1,68 @@
 name: release
+
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
+      - "v*"
+  workflow_dispatch: {}
 
 jobs:
-  build-and-release:
+  build:
+    name: Build binaries
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22.x'
-          cache: true
-
-      - name: Build CLI and Server (matrix)
+          go-version-file: go.work
+      - name: Build server
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
         run: |
-          set -euo pipefail
           mkdir -p dist
-          platforms=(
-            linux/amd64
-            linux/arm64
-            windows/amd64
-            darwin/amd64
-            darwin/arm64
-          )
-          for p in "${platforms[@]}"; do
-            GOOS="${p%/*}"; GOARCH="${p#*/}"
-            ext=""; [ "$GOOS" = windows ] && ext=.exe
-            # server
-            echo "Building server for $GOOS/$GOARCH"
-            (cd server && env CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -o ../dist/server-${GOOS}-${GOARCH}${ext} ./cmd/server)
-            # cli
-            echo "Building cli for $GOOS/$GOARCH"
-            (cd clients/cli && env CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -o ../../dist/clip-sync-${GOOS}-${GOARCH}${ext} .)
-          done
+          ext=""; [ "$GOOS" = windows ] && ext=.exe || true
+          go -C server build -trimpath -ldflags "-s -w" -o "dist/server_${GOOS}_${GOARCH}${ext}" ./cmd/server
+      - name: Build CLI
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          ext=""; [ "$GOOS" = windows ] && ext=.exe || true
+          go -C clients/cli build -trimpath -ldflags "-s -w" -o "dist/cli_${GOOS}_${GOARCH}${ext}" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clip-sync-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/server_${{ matrix.goos }}_${{ matrix.goarch }}*
+            dist/cli_${{ matrix.goos }}_${{ matrix.goarch }}*
 
-      - name: Create release
+  release:
+    name: Publish release
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Collect files
+        run: |
+          mkdir -p upload
+          find dist -type f -maxdepth 2 -print -exec cp {} upload/ \;
+          ls -la upload
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
-          generate_release_notes: true
+          files: upload/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

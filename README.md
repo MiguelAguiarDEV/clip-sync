@@ -72,6 +72,73 @@ $resp = Invoke-WebRequest "http://localhost:8080/upload" -Method POST -ContentTy
 Invoke-WebRequest ("http://localhost:8080" + $resp.upload_url) -OutFile "$env:TEMP\clip-sync-dl.bin"
 ```
 
+## User Guide
+
+This section shows how to run the server, find its IP, open the firewall, and connect Linux and Windows clients.
+
+### 1) Run the server
+
+- Dev (from repo root):
+  - `go -C server run ./cmd/server --addr 0.0.0.0:8080`
+- Built binary:
+  - `go -C server build -o ../bin/server ./cmd/server`
+  - `./bin/server --addr 0.0.0.0:8080`
+
+### 2) Find the server IP
+
+- LAN IP candidates:
+  - `hostname -I`  # Linux (one of these is your LAN IP)
+  - `ip route get 1.1.1.1 | sed -n 's/.*src \([^ ]*\).*/\1/p'`  # primary IP
+- Public IP (if directly exposed):
+  - `curl -s ifconfig.me || curl -s https://api.ipify.org`
+
+Use that IP in all client commands as `<SERVER_IP>`.
+
+### 3) Open the firewall (Linux)
+
+- UFW examples (adjust if needed):
+  - `sudo ufw allow 8080/tcp`
+  - `sudo ufw status`
+- Firewalld examples:
+  - `sudo firewall-cmd --add-port=8080/tcp --permanent && sudo firewall-cmd --reload`
+
+If your server is behind a home router, forward external TCP port 8080 to your server’s LAN IP.
+
+### 4) Run clients
+
+Use the same `--token` for devices of the same user and a unique `--device` per device.
+
+- Linux (Wayland/X11) — Sync clipboard both ways on this machine:
+  - `go -C clients/cli run . --mode sync --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1 --poll-ms 500`
+
+- Linux — Only receive to clipboard:
+  - `go -C clients/cli run . --mode recv --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1`
+
+- Linux — Only watch and broadcast clipboard changes:
+  - `go -C clients/cli run . --mode watch --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1 --poll-ms 500`
+
+- Linux — Send a one-off clip:
+  - `echo "hola" | go -C clients/cli run . --mode send --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1`
+  - `go -C clients/cli run . --mode send --file ./foto.png --mime image/png --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1`
+
+- Windows — Build CLI (from Linux) and run on Windows:
+  - Build: `GOOS=windows GOARCH=amd64 go -C clients/cli build -o ../../bin/cli.exe .`
+  - On Windows PowerShell:
+    - `.\\cli.exe --mode sync --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1`
+    - Or receive only: `.\\cli.exe --mode recv --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1`
+
+### 5) Optional security (HMAC tokens and TLS)
+
+- HMAC tokens: set `CLIPSYNC_HMAC_SECRET` on the server. Token format: `user:exp_unix:hex(hmac_sha256(secret, user|exp))`.
+  - Example generation (bash):
+    - `uid=u1; exp=$(( $(date +%s) + 86400 )); secret=mys3cr3t; payload="$uid|$exp"; mac=$(printf "%s" "$payload" | openssl dgst -sha256 -hmac "$secret" -binary | xxd -p -c 256); echo "$uid:$exp:$mac"`
+
+- TLS/wss via Caddy (example Caddyfile):
+  - `:443 {`
+  - `  reverse_proxy 127.0.0.1:8080`
+  - `}`
+  - Then use `wss://your.domain/ws` in clients.
+
 ## Protocol
 
 See docs/protocol.md for the full v1 spec.

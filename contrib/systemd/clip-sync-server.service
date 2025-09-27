@@ -1,0 +1,19 @@
+[Unit]
+Description=Clip-Sync Server (user)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Ajusta si movieras el repo
+WorkingDirectory=%h/Work/clip-sync
+Environment=CLIPSYNC_UPLOAD_DIR=%h/Work/clip-sync/uploads
+Environment=CLIPSYNC_LOG_LEVEL=info
+# Escucha en todas las interfaces (puerto 8080)
+ExecStart=%h/Work/clip-sync/bin/server --addr 0.0.0.0:8080
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+
