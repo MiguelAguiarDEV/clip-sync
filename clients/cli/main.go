@@ -136,6 +136,7 @@ func runListen(ctx context.Context, c *websocket.Conn) error {
 // runRecvApply listens and applies incoming text clips to the OS clipboard.
 func runRecvApply(ctx context.Context, c *websocket.Conn, wsAddr string, markRemote func(hash string)) error {
     base := httpBaseFromWS(wsAddr)
+    dd := newDD(512)
     for {
         var env types.Envelope
         if err := wsjson.Read(ctx, c, &env); err != nil {
@@ -145,6 +146,7 @@ func runRecvApply(ctx context.Context, c *websocket.Conn, wsAddr string, markRem
             continue
         }
         cl := env.Clip
+        if dd.ExistsOrAdd(cl.MsgID) { continue }
         if strings.HasPrefix(strings.ToLower(cl.Mime), "text/") {
             var data []byte
             if len(cl.Data) > 0 {
@@ -206,7 +208,9 @@ func runWatchLoop(ctx context.Context, c *websocket.Conn, wsAddr string, interva
             }
             data := []byte(txt)
             if len(data) <= types.MaxInlineBytes {
-                if err := runSendText(ctx, c, txt); err != nil {
+                // stable msg_id for dedupe across devices
+                msgID := "h-" + hashString(txt)
+                if err := runSendTextWithMsgID(ctx, c, txt, msgID); err != nil {
                     fmt.Fprintln(os.Stderr, "send text failed:", err)
                     continue
                 }
@@ -216,7 +220,8 @@ func runWatchLoop(ctx context.Context, c *websocket.Conn, wsAddr string, interva
                 tmpPath := tmp.Name()
                 _, _ = tmp.Write(data)
                 _ = tmp.Close()
-                if err := runSendFile(ctx, c, wsAddr, tmpPath, "text/plain"); err != nil {
+                msgID := "h-" + hashString(txt)
+                if err := runSendFileWithMsgID(ctx, c, wsAddr, tmpPath, "text/plain", msgID); err != nil {
                     fmt.Fprintln(os.Stderr, "send file failed:", err)
                 }
                 _ = os.Remove(tmpPath)
@@ -242,6 +247,25 @@ func runSendText(ctx context.Context, c *websocket.Conn, text string) error {
 		},
 	}
 	return wsjson.Write(ctx, c, env)
+}
+
+func runSendTextWithMsgID(ctx context.Context, c *websocket.Conn, text, msgID string) error {
+    data := []byte(text)
+    if len(data) > types.MaxInlineBytes {
+        return fmt.Errorf("text payload is %d bytes; exceeds MaxInlineBytes=%d — use --file",
+            len(data), types.MaxInlineBytes)
+    }
+    if msgID == "" { msgID = "m-" + time.Now().UTC().Format("20060102T150405.000Z0700") }
+    env := types.Envelope{
+        Type: "clip",
+        Clip: &types.Clip{
+            MsgID: msgID,
+            Mime:  "text/plain",
+            Size:  len(data),
+            Data:  data,
+        },
+    }
+    return wsjson.Write(ctx, c, env)
 }
 
 func runSendFile(ctx context.Context, c *websocket.Conn, wsAddr, path, mimeType string) error {
@@ -271,6 +295,28 @@ func runSendFile(ctx context.Context, c *websocket.Conn, wsAddr, path, mimeType 
 	}
 	fmt.Printf("sent file: %s (%d bytes) url=%s\n", path, size, uploadURL)
 	return nil
+}
+
+func runSendFileWithMsgID(ctx context.Context, c *websocket.Conn, wsAddr, path, mimeType, msgID string) error {
+    base := httpBaseFromWS(wsAddr)
+    upCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+    defer cancel()
+    if mimeType == "" { mimeType = detectMime(path, "application/octet-stream") }
+    uploadURL, size, err := uploadFile(upCtx, base, path, mimeType)
+    if err != nil { return err }
+    if msgID == "" { msgID = "m-" + time.Now().UTC().Format("20060102T150405.000Z0700") }
+    env := types.Envelope{
+        Type: "clip",
+        Clip: &types.Clip{
+            MsgID:     msgID,
+            Mime:      mimeType,
+            Size:      size,
+            UploadURL: uploadURL,
+        },
+    }
+    if err := wsjson.Write(ctx, c, env); err != nil { return err }
+    fmt.Printf("sent file: %s (%d bytes) url=%s\n", path, size, uploadURL)
+    return nil
 }
 
 /* ---------- main ---------- */
