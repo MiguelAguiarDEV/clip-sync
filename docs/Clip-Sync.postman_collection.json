@@ -1,0 +1,38 @@
+{
+  "info": {
+    "name": "Clip-Sync v1",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Upload",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/octet-stream"}
+        ],
+        "url": {"raw": "{{base}}/upload", "host": ["{{base}}"], "path": ["upload"]},
+        "body": {"mode": "raw", "raw": "Hello from Postman"}
+      }
+    },
+    {
+      "name": "Download (replace id)",
+      "request": {
+        "method": "GET",
+        "url": {"raw": "{{base}}/d/{{id}}", "host": ["{{base}}"], "path": ["d", "{{id}}"]}
+      }
+    },
+    {
+      "name": "Healthz",
+      "request": {
+        "method": "GET",
+        "url": {"raw": "{{base}}/healthz", "host": ["{{base}}"], "path": ["healthz"]}
+      }
+    }
+  ],
+  "variable": [
+    {"key": "base", "value": "http://localhost:8080"},
+    {"key": "id", "value": "<replace>"}
+  ]
+}
+
