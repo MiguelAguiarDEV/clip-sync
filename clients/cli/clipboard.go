@@ -41,6 +41,15 @@ func getClipboardText() (string, error) {
 
 func setClipboardText(s string) error {
     if runtime.GOOS == "windows" {
+        // Prefer clip.exe (simple, fast). Fallback to PowerShell Set-Clipboard.
+        if _, err := exec.LookPath("clip.exe"); err == nil {
+            cmd := exec.Command("clip.exe")
+            cmd.Stdin = bytes.NewBufferString(s)
+            if out, err := cmd.CombinedOutput(); err != nil {
+                return fmt.Errorf("clip.exe: %v (%s)", err, string(out))
+            }
+            return nil
+        }
         cmd := exec.Command("powershell", "-NoProfile", "-Command", "Set-Clipboard")
         cmd.Stdin = bytes.NewBufferString(s)
         if out, err := cmd.CombinedOutput(); err != nil {
@@ -74,4 +83,3 @@ func setClipboardText(s string) error {
     }
     return errors.New("no clipboard backend found (install wl-clipboard or xclip)")
 }
-
