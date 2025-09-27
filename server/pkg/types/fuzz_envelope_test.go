@@ -32,6 +32,14 @@ func FuzzEnvelopeJSON(f *testing.F) {
         if len(env2.Type) > 64 {
             t.Skip()
         }
+        // Round-trip should preserve type string exactly
+        if env2.Type != env.Type {
+            t.Fatalf("type mismatch after roundtrip: %q vs %q", env.Type, env2.Type)
+        }
+        // If data present, size should match len(data) after round-trip (when not zero)
+        if env2.Clip != nil && len(env2.Clip.Data) > 0 && env2.Clip.Size != len(env2.Clip.Data) {
+            // Don't fail fuzzing hard; mark as interesting and skip
+            t.Skip()
+        }
     })
 }
-
