@@ -29,7 +29,7 @@
 - [X] Validar `device_id` (formato; opcional registro)
 - [X] `/upload`: permitir solo tipos aceptados
 - [X] Flags/env: puertos, límites, dir uploads, log level
-- [ ] `/debug/pprof` y opcional `expvar`
+- [X] `/debug/pprof` y opcional `expvar`
 
 - [X] Makefile/justfile para build/test/run
 - [X] CI (GitHub Actions): lint, `go test ./...`, build server+cli
