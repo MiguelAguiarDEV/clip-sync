@@ -206,3 +206,5 @@ test:
 ## License
 
 MIT (to be added).
+Tutoriales
+- Español: docs/tutorial-linux-windows.md
