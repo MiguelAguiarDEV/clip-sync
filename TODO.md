@@ -39,13 +39,13 @@
 - [X] CLI: detección simple de mime por extensión
 - [X] CLI: salida limpia y códigos de salida coherentes
 
-- [ ] Benchmarks ligeros del Hub
-- [ ] Fuzzing del envelope JSON (corpus pequeño)
+- [X] Benchmarks ligeros del Hub
+- [X] Fuzzing del envelope JSON (corpus pequeño)
 
-- [ ] Documentar protocolo (hello, clip inline, `upload_url`)
-- [ ] README de arranque rápido (server + 2 CLI)
-- [ ] Colección Postman
-- [ ] Changelog v1
+- [X] Documentar protocolo (hello, clip inline, `upload_url`)
+- [X] README de arranque rápido (server + 2 CLI)
+- [X] Colección Postman
+- [X] Changelog v1
 
 - [ ] CLI: `watch` monitorea portapapeles y publica por WS
 - [ ] CLI: `recv` aplica clips entrantes al portapapeles

@@ -74,6 +74,8 @@ Invoke-WebRequest ("http://localhost:8080" + $resp.upload_url) -OutFile "$env:TE
 
 ## Protocol
 
+See docs/protocol.md for the full v1 spec.
+
 ### WebSocket `/ws`
 
 Envelope:
