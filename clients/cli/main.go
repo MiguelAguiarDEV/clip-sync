@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 	"time"
 
 	"github.com/coder/websocket"
@@ -187,7 +188,7 @@ func main() {
 	mode := flag.String("mode", "listen", "listen|send")
 	text := flag.String("text", "", "text to send (send mode). If empty, read from stdin")
 	file := flag.String("file", "", "path to file to send (uses HTTP /upload)")
-    mime := flag.String("mime", "", "mime type for --file (auto-detect if empty)")
+	mime := flag.String("mime", "", "mime type for --file (auto-detect if empty)")
 	flag.Parse()
 
 	switch *mode {
@@ -210,46 +211,120 @@ func main() {
         }
 
 	case "send":
-        var c *websocket.Conn
-        var err error
-        for attempt := 0; attempt < 5; attempt++ {
-            ct, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-            c, err = dialAndHello(ct, *addr, *token, *device)
-            cancel()
-            if err == nil {
-                break
-            }
-            if attempt == 4 {
-                fatalf(exitConn, "connect failed: %v", err)
-            }
-            fmt.Fprintln(os.Stderr, "connect failed:", err)
-            sleepBackoff(attempt)
-        }
-        defer c.Close(websocket.StatusNormalClosure, "")
+		var c *websocket.Conn
+		var err error
+		for attempt := 0; attempt < 5; attempt++ {
+			ct, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			c, err = dialAndHello(ct, *addr, *token, *device)
+			cancel()
+			if err == nil {
+				break
+			}
+			if attempt == 4 {
+				fatalf(exitConn, "connect failed: %v", err)
+			}
+			fmt.Fprintln(os.Stderr, "connect failed:", err)
+			sleepBackoff(attempt)
+		}
+		defer c.Close(websocket.StatusNormalClosure, "")
 
 		if *file != "" {
-            if err := runSendFile(context.Background(), c, *addr, *file, *mime); err != nil {
-                fatalf(exitUpload, "%v", err)
-            }
-            return
-        }
+			if err := runSendFile(context.Background(), c, *addr, *file, *mime); err != nil {
+				fatalf(exitUpload, "%v", err)
+			}
+			return
+		}
 
 		payload := strings.TrimSpace(*text)
-		if payload == "" {
-			b, _ := io.ReadAll(os.Stdin)
-			payload = strings.TrimSpace(string(b))
+		if payload != "" {
+			if err := runSendText(context.Background(), c, payload); err != nil {
+				fatalf(exitSend, "%v", err)
+			}
+			fmt.Println("sent")
+			return
 		}
-        if payload == "" {
-            fatalf(exitUsage, "send mode: provide --text or --file (or pipe stdin)")
-        }
-        if err := runSendText(context.Background(), c, payload); err != nil {
-            fatalf(exitSend, "%v", err)
-        }
-        fmt.Println("sent")
+
+		// stable pipe mode: if stdin is piped, read and decide inline vs upload
+		if isInputFromPipe() {
+			data, tmpPath, size, mimeType, err := readToBufferOrFile(os.Stdin, types.MaxInlineBytes)
+			if err != nil {
+				fatalf(exitUsage, "stdin read error: %v", err)
+			}
+			if tmpPath != "" {
+				defer os.Remove(tmpPath)
+				if err := runSendFile(context.Background(), c, *addr, tmpPath, mimeType); err != nil {
+					fatalf(exitUpload, "%v", err)
+				}
+				return
+			}
+			// small payload fits inline
+			_ = size // already len(data)
+			if err := runSendText(context.Background(), c, string(data)); err != nil {
+				fatalf(exitSend, "%v", err)
+			}
+			fmt.Println("sent")
+			return
+		}
+
+		fatalf(exitUsage, "send mode: provide --text or --file (or pipe stdin)")
 
 	default:
         fatalf(exitUsage, "unknown -mode=%q (use listen|send)", *mode)
     }
+}
+
+// isInputFromPipe returns true if stdin is not a TTY/character device (i.e., data is being piped).
+func isInputFromPipe() bool {
+    fi, err := os.Stdin.Stat()
+    if err != nil { return false }
+    return (fi.Mode() & os.ModeCharDevice) == 0
+}
+
+// readToBufferOrFile reads from r. If size <= maxInline, returns data in memory and empty tmpPath.
+// If size > maxInline, spills to a temp file and returns its path and a guessed MIME.
+func readToBufferOrFile(r io.Reader, maxInline int) (data []byte, tmpPath string, size int, mimeType string, err error) {
+    // heuristic for text vs binary: we will track a rolling UTF-8 validity while reading
+    buf := make([]byte, 32*1024)
+    var mem []byte
+    var f *os.File
+    total := 0
+    textLikely := true
+    for {
+        n, er := r.Read(buf)
+        if n > 0 {
+            chunk := buf[:n]
+            total += n
+            if textLikely && !utf8.Valid(chunk) { textLikely = false }
+            if f == nil && len(mem)+n <= maxInline {
+                mem = append(mem, chunk...)
+            } else {
+                if f == nil {
+                    // spill
+                    var e error
+                    f, e = os.CreateTemp("", "clipsync-pipe-*.bin")
+                    if e != nil { return nil, "", 0, "", e }
+                    if len(mem) > 0 {
+                        if _, e = f.Write(mem); e != nil { f.Close(); os.Remove(f.Name()); return nil, "", 0, "", e }
+                        mem = nil
+                    }
+                }
+                if _, e := f.Write(chunk); e != nil {
+                    f.Close(); os.Remove(f.Name()); return nil, "", 0, "", e
+                }
+            }
+        }
+        if er == io.EOF { break }
+        if er != nil { return nil, "", 0, "", er }
+    }
+    if f != nil {
+        _ = f.Sync(); _ = f.Close()
+        mt := "application/octet-stream"
+        if textLikely { mt = "text/plain" }
+        return nil, f.Name(), total, mt, nil
+    }
+    mt := "application/octet-stream"
+    if textLikely { mt = "text/plain" }
+    return mem, "", total, mt, nil
 }
 
 // detectMime returns mime type by file extension; fallback if unknown.
