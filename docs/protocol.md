@@ -55,6 +55,10 @@ Deduplication:
 - Optional LRU per user controlled by `CLIPSYNC_DEDUPE` capacity (0 disables).
 - When a duplicate `msg_id` is detected, the message is dropped.
 
+Client dedupe (recommended):
+- Receivers may drop repeated `msg_id` values locally to avoid reapplying the same clip.
+- Senders may choose a stable `msg_id` for clipboard-driven events, e.g., `h-<sha|fnv>` of the text, so transient watchers do not flood duplicates.
+
 ## HTTP API
 
 ### POST /upload
@@ -121,4 +125,3 @@ Auth:
 
 - `/healthz` JSON metrics.
 - Optional `/debug/pprof/*` and `/debug/vars` (expvar) when enabled.
-

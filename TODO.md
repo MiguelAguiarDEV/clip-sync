@@ -50,5 +50,5 @@
 - [X] CLI: `watch` monitorea portapapeles y publica por WS
 - [X] CLI: `recv` aplica clips entrantes al portapapeles
 - [X] Clips grandes: subir a `/upload` en `watch` y descargar en `recv`
-- [ ] Deduplicación por `msg_id` en server y cliente
-- [ ] Binarios para Windows, macOS y Linux
+- [X] Deduplicación por `msg_id` en server y cliente
+- [X] Binarios para Windows, macOS y Linux (workflow de release)
