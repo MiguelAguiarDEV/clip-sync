@@ -34,10 +34,10 @@
 - [X] Makefile/justfile para build/test/run
 - [X] CI (GitHub Actions): lint, `go test ./...`, build server+cli
 
-- [ ] CLI: reconexión exponencial
-- [ ] CLI: modo pipe estable (`echo hola | clip-sync --mode send`)
-- [ ] CLI: detección simple de mime por extensión
-- [ ] CLI: salida limpia y códigos de salida coherentes
+- [X] CLI: reconexión exponencial
+- [X] CLI: modo pipe estable (`echo hola | clip-sync --mode send`)
+- [X] CLI: detección simple de mime por extensión
+- [X] CLI: salida limpia y códigos de salida coherentes
 
 - [ ] Benchmarks ligeros del Hub
 - [ ] Fuzzing del envelope JSON (corpus pequeño)
