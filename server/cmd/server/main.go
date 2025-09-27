@@ -29,6 +29,8 @@ func main() {
     uploadAllowed := flag.String("upload-allowed", envOr("CLIPSYNC_UPLOAD_ALLOWED", ""), "comma-separated list of allowed MIME types (e.g. text/plain,image/*). Empty disables whitelist")
     inlineMax := flag.Int("inline-max-bytes", func() int { if v := os.Getenv("CLIPSYNC_INLINE_MAXBYTES"); v != "" { if n, err := strconv.Atoi(v); err == nil { return n } }; return 64 << 10 }(), "max inline clip size")
     logLevel := flag.String("log-level", envOr("CLIPSYNC_LOG_LEVEL", "info"), "log level: debug|info|error|off")
+    pprofEn := flag.Bool("pprof", envOr("CLIPSYNC_PPROF", "") != "", "enable /debug/pprof endpoints")
+    expvarEn := flag.Bool("expvar", envOr("CLIPSYNC_EXPVAR", "") != "", "enable /debug/vars endpoint")
     flag.Parse()
 
     // Pasar flags a env para que NewApp los tome
@@ -37,6 +39,8 @@ func main() {
     _ = os.Setenv("CLIPSYNC_INLINE_MAXBYTES", fmt.Sprintf("%d", *inlineMax))
     _ = os.Setenv("CLIPSYNC_UPLOAD_ALLOWED", *uploadAllowed)
     _ = os.Setenv("CLIPSYNC_LOG_LEVEL", *logLevel)
+    if *pprofEn { _ = os.Setenv("CLIPSYNC_PPROF", "1") } else { _ = os.Unsetenv("CLIPSYNC_PPROF") }
+    if *expvarEn { _ = os.Setenv("CLIPSYNC_EXPVAR", "1") } else { _ = os.Unsetenv("CLIPSYNC_EXPVAR") }
 
     a := app.NewApp()
 
