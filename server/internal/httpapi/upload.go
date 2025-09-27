@@ -6,15 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 type UploadServer struct {
 	Dir      string
 	MaxBytes int64
+	Allowed  []string // whitelist de mimes permitidos; vacío = desactivado
 }
 
 type uploadResp struct {
@@ -31,6 +34,21 @@ func (s *UploadServer) Upload(w http.ResponseWriter, r *http.Request) {
 	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
 		http.Error(w, "storage error", http.StatusInternalServerError)
 		return
+	}
+
+	// validar Content-Type contra whitelist si está configurada
+	if len(s.Allowed) > 0 {
+		ct := r.Header.Get("Content-Type")
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		if media, _, err := mime.ParseMediaType(ct); err == nil {
+			ct = media
+		}
+		if !isAllowedMime(s.Allowed, ct) {
+			http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
+			return
+		}
 	}
 
 	id := randHex(16)
@@ -108,4 +126,28 @@ func randHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func isAllowedMime(allowed []string, ct string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	ct = strings.ToLower(strings.TrimSpace(ct))
+	for _, p := range allowed {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p == "" {
+			continue
+		}
+		if strings.HasSuffix(p, "/*") {
+			base := strings.TrimSuffix(p, "/*")
+			if strings.HasPrefix(ct, base+"/") {
+				return true
+			}
+			continue
+		}
+		if p == ct {
+			return true
+		}
+	}
+	return false
 }
