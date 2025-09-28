@@ -1,122 +1,167 @@
 # clip-sync
 
-Sincroniza tu portapapeles entre dispositivos (Windows/Linux). Server en Go + CLI. WebSocket para señalización y HTTP para cargas grandes.
+Clip-Sync is a lightweight CLI to sync your clipboard across Windows and Linux, on the same LAN or over the Internet. Small payloads go inline via /ws; large payloads use /upload and are shared by an upload_url. Each user gets a hub with fan-out to devices and no echo to the sender. Built in Go with WebSocket signaling and HTTP for large transfers.
 
-## Índice
-- [Introducción](#introduccion)
-- [Demo](#demo)
-- [Inicio Rápido](#inicio-rapido)
-  - [Servidor en Windows](#servidor-en-windows)
-  - [Servidor en Linux](#servidor-en-linux)
-- [Clientes](#clientes)
-  - [Windows](#clientes-windows)
-  - [Linux](#clientes-linux)
-- [Releases](#releases)
-- [Configuración](#configuracion)
-- [Especificaciones Técnicas](#especificaciones-tecnicas)
-- [Estructura del Repositorio](#estructura-del-repositorio)
-- [Documentación Técnica](#documentacion-tecnica)
+## Table of Contents
 
-<a id="introduccion"></a>
-## Introducción
-Clip‑Sync permite compartir texto entre dispositivos en la misma red o a través de Internet. Para cargas pequeñas se envía inline, y para cargas grandes se usa `/upload` y se comparte un `upload_url`.
+* [Introduction](#introduction)
+* [Demo](#demo)
+* [Quick Start](#quick-start)
+  * [Server on Windows](#server-on-windows)
+  * [Server on Linux](#server-on-linux)
+* [Clients](#clients)
+  * [Windows](#windows)
+  * [Linux](#linux)
+* [Releases](#releases)
+* [Configuration](#configuration)
+* [Technical Specs](#technical-specs)
+* [Repository Layout](#repository-layout)
+* [Technical Docs](#technical-docs)
+
+<a id="introduction"></a>
+
+## Introduction
+
+Clip-Sync is a lightweight CLI to sync your clipboard across Windows and Linux, on the same LAN or over the Internet. Small payloads go inline via /ws; large payloads use /upload and are shared by an upload_url. Each user gets a hub with fan-out to devices and no echo to the sender. Built in Go with WebSocket signaling and HTTP for large transfers.
 
 <a id="demo"></a>
+
 ## Demo
+
 ![Demo](demos/clip-sync-demo.gif)
 
-<a id="inicio-rapido"></a>
-## Inicio Rápido
+<a id="quick-start"></a>
 
-Requisitos:
-- Go 1.22+ y Git, o usar los binarios en `bin/`.
-- Puerto `8080/tcp` accesible desde los clientes.
+## Quick Start
 
-<a id="servidor-en-windows"></a>
-### Servidor en Windows
-1) Ejecutar el servidor (PowerShell):
+Requirements:
+
+* Go 1.22+ and Git, or use prebuilt binaries.
+* TCP port `8080` reachable from clients.
+
+<a id="server-on-windows"></a>
+
+### Server on Windows
+
+1) Run the server (PowerShell):
+
 ```powershell
 go -C server run ./cmd/server --addr :8080
 ```
-2) Abrir el puerto en el firewall (admin):
+
+2) Open the firewall (admin):
+
 ```powershell
 netsh advfirewall firewall add rule name="clip-sync" dir=in action=allow protocol=TCP localport=8080
 ```
 
-<a id="servidor-en-linux"></a>
-### Servidor en Linux
-1) Ejecutar el servidor:
+<a id="server-on-linux"></a>
+
+### Server on Linux
+
+1) Run the server:
+
 ```bash
 go -C server run ./cmd/server --addr 0.0.0.0:8080
 ```
-2) Abrir el puerto en el firewall (UFW o equivalente):
+
+2) Open the port (UFW or equivalent):
+
 ```bash
 sudo ufw allow 8080/tcp
 ```
 
-<a id="clientes"></a>
-## Clientes
-Usa el mismo `--token` para todos los dispositivos del mismo usuario y un `--device` único por equipo.
+<a id="clients"></a>
 
-<a id="clientes-windows"></a>
+## Clients
+
+Use the same `--token` for devices of the same user and a unique `--device` per machine.
+
+<a id="windows"></a>
+
 ### Windows
-- Sincronización bidireccional y logs verbosos:
+
+* Bidirectional sync with verbose logs:
+
 ```powershell
 .\bin\cli.exe --mode sync --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1 -v
 ```
-- Solo recibir y aplicar al portapapeles:
+
+* Receive only and apply to clipboard:
+
 ```powershell
 .\bin\cli.exe --mode recv --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1 -v
 ```
-- Enviar una vez (texto o archivo):
+
+* One‑shot send (text or file):
+
 ```powershell
-.\bin\cli.exe --mode send --text "hola" --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1
-.\bin\cli.exe --mode send --file .\foto.png --mime image/png --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1
+.\bin\cli.exe --mode send --text "hello" --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1
+.\bin\cli.exe --mode send --file .\photo.png --mime image/png --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1
 ```
 
-<a id="clientes-linux"></a>
+<a id="linux"></a>
+
 ### Linux
-- Sincronización bidireccional y logs verbosos:
+
+* Bidirectional sync with verbose logs:
+
 ```bash
 ./bin/cli --mode sync --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1 -v
 ```
-- Solo recibir y aplicar al portapapeles:
+
+* Receive only and apply to clipboard:
+
 ```bash
 ./bin/cli --mode recv --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1 -v
 ```
-- Enviar una vez (texto o archivo):
+
+* One‑shot send (text or file):
+
 ```bash
-echo "hola" | ./bin/cli --mode send --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1
-./bin/cli --mode send --file ./foto.png --mime image/png --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1
+echo "hello" | ./bin/cli --mode send --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1
+./bin/cli --mode send --file ./photo.png --mime image/png --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1
 ```
 
-<a id="configuracion"></a>
-## Configuración
-- `--addr` (`CLIPSYNC_ADDR`): dirección de escucha del server (por defecto `:8080`).
-- `--inline-max-bytes` (`CLIPSYNC_INLINE_MAXBYTES`): tamaño inline máx. (default 64 KiB).
-- `--upload-dir`, `--upload-max-bytes`, `--upload-allowed` (whitelist de MIME, admite comodines `image/*`).
-- `--log-level` (`CLIPSYNC_LOG_LEVEL`): `debug|info|error|off`.
-- Seguridad opcional (HMAC): define `CLIPSYNC_HMAC_SECRET` en el servidor. Token: `user:exp_unix:hex(hmac_sha256(secret, user|exp))`.
-- TLS: usa un reverse proxy (ej. Caddy/Nginx) y conecta por `wss://.../ws`.
+<a id="releases"></a>
 
-<a id="especificaciones-tecnicas"></a>
-## Especificaciones Técnicas
-- Stack: Go 1.22, WebSocket (`/ws`) + HTTP (`/upload`, `/d/{id}`, `/health`, `/healthz`).
-- Arquitectura: hub por usuario, fan‑out a dispositivos, no se hace echo al emisor.
-- Escalabilidad: backoff exponencial en clientes, dedupe por `msg_id` en server y cliente.
-- Portapapeles:
-  - Windows: `clip.exe` o PowerShell (`Get-Clipboard`/`Set-Clipboard`).
-  - Linux: Wayland `wl-clipboard` o X11 `xclip`/`xsel`.
-- Límite inline: 64 KiB; cargas grandes via `/upload` (50 MiB por defecto).
-- Observabilidad: `/health` simple, `/healthz` JSON de métricas, `/debug/pprof/*` y `/debug/vars` opcionales.
-- Calidad: tests unitarios e integración; CI en GitHub Actions.
+## Releases
 
-<a id="estructura-del-repositorio"></a>
-## Estructura del Repositorio
+Prebuilt artifacts are published under **Releases**. Verify checksums when provided. You can also build locally using `make dist` or the scripts under `scripts/`.
+
+<a id="configuration"></a>
+
+## Configuration
+
+* `--addr` (`CLIPSYNC_ADDR`): listen address (default `:8080`).
+* `--inline-max-bytes` (`CLIPSYNC_INLINE_MAXBYTES`): inline size limit (default 64 KiB).
+* `--upload-dir`, `--upload-max-bytes`, `--upload-allowed`: upload directory, max size, allowed MIME whitelist (supports wildcards like `image/*`).
+* `--log-level` (`CLIPSYNC_LOG_LEVEL`): `debug|info|error|off`.
+* Optional security (HMAC): set `CLIPSYNC_HMAC_SECRET`. Token: `user:exp_unix:hex(hmac_sha256(secret, user|exp))`.
+* TLS: use a reverse proxy (e.g., Caddy/Nginx) and connect via `wss://.../ws`.
+
+<a id="technical-specs"></a>
+
+## Technical Specs
+
+* Stack: Go 1.22, WebSocket (`/ws`) + HTTP (`/upload`, `/d/{id}`, `/health`, `/healthz`).
+* Architecture: per‑user hub with fan‑out to devices; no echo to sender.
+* Scalability: client exponential backoff; dedup by `msg_id` on server and client.
+* Clipboard backends:
+  * Windows: `clip.exe` or PowerShell (`Get-Clipboard` / `Set-Clipboard`).
+  * Linux: Wayland `wl-clipboard` or X11 `xclip` / `xsel`.
+* Inline limit: 64 KiB. Large payloads via `/upload` (50 MiB default).
+* Observability: `/health` liveness, `/healthz` JSON metrics, optional `/debug/pprof/*` and `/debug/vars`.
+* Quality: unit + integration tests; GitHub Actions CI.
+
+<a id="repository-layout"></a>
+
+## Repository Layout
+
 ```
 .
-├─ go.work                 # workspace multi-módulo
-├─ server/                 # Módulo Go: server
+├─ go.work                 # multi-module workspace
+├─ server/                 # Go module: server
 │  ├─ cmd/server           # entrypoint
 │  ├─ internal/
 │  │  ├─ app               # HTTP mux (routes: /health, /healthz, /ws, /upload, /d/{id})
@@ -124,11 +169,14 @@ echo "hola" | ./bin/cli --mode send --addr ws://<SERVER_IP>:8080/ws --token u1 -
 │  │  ├─ hub               # pub/sub (fan-out)
 │  │  └─ ws                # WebSocket handler
 │  ├─ pkg/types            # envelopes
-│  └─ tests                # integración/E2E
-└─ clients/cli/            # Módulo Go: CLI
+│  └─ tests                # integration/E2E
+└─ clients/cli/            # Go module: CLI
 ```
 
-<a id="documentacion-tecnica"></a>
-## Documentación Técnica
-- Protocolo v1: `docs/protocol.md`
-- Notas técnicas Linux/Windows (dev/recruiters): `docs/tutorial-linux-windows.md`
+<a id="technical-docs"></a>
+
+## Technical Docs
+
+* Protocol v1: `docs/protocol.md`
+* Linux/Windows technical notes (dev/recruiters): `docs/tutorial-linux-windows.md`
+

@@ -1,54 +1,52 @@
 # Clip‑Sync — Checklist v1
 
-*Actualizado: 2025-09-23*
+- [X] Initial repo and Go workspace configured
+- [X] Basic HTTP mux with `/health`
+- [X] Fan‑out hub implemented
+- [X] WS server registered at `/ws`
+- [X] MVP auth (token == userID)
+- [X] WS keep‑alive (ping/pong + timeout)
 
-- [X] Repo inicial y workspace Go configurado
-- [X] HTTP mux básico con `/health`
-- [X] Hub de difusión (fan‑out) creado
-- [X] Servidor WS básico registrado en `/ws`
-- [X] Auth MVP (token == userID)
-- [X] Keep‑alive WS (ping/pong + timeout)
+- [X] `/upload` endpoint with `MaxBytes` limit and random IDs
+- [X] `/upload` unit tests passing
+- [X] `/upload` route registered in mux
+- [X] E2E tests: basic WS + upload+signal (UploadAndSignal)
 
-- [X] Endpoint `/upload` con límite `MaxBytes` y nombre aleatorio
-- [X] Tests unitarios de `/upload` en verde
-- [X] Ruta `/upload` registrada en el mux
-- [X] Tests E2E: WS básico + upload+señal (UploadAndSignal)
+- [X] Negative WS tests: inconsistent size, empty clip
+- [X] WS validations: `len(Data)==Size`, `Size<=MaxInlineBytes`, `UploadURL` when `Data` is empty
+- [X] Default `mime` assignment when missing
+- [X] Per‑device rate limit
+- [X] Metrics: clips, drops, connections counters
+- [X] Structured logs: request id, device, user
+- [X] `/healthz` with minimal metrics
+- [X] Graceful shutdown: `http.Server` + hub drain
+- [X] Optional dedupe by `msg_id` (small LRU)
+- [X] Visible backpressure: per‑device drop counters
+- [X] HMAC auth → `userID` + expiry
 
-- [X] Tests negativos WS: size inconsistente, clip vacío
-- [X] Validaciones WS: `len(Data)==Size`, `Size<=MaxInlineBytes`, `UploadURL` si no hay `Data`
-- [X] Asignar `mime` por defecto cuando falte
-- [X] Rate limit por dispositivo
-- [X] Métricas: contadores de clips, drops, conexiones
-- [X] Logs estructurados: request id, device, user
-- [X] `/healthz` con métricas mínimas
-- [X] Cierre amable: `http.Server` con `Shutdown` y drenaje de `Hub`
-- [X] Deduplicación opcional por `msg_id` (LRU corta)
-- [X] Backpressure visible: contador de descartes por device
-- [X] Auth HMAC firmado → `userID` + caducidad
+- [X] Validate `device_id` (format; optional registry)
+- [X] `/upload`: allow only accepted types
+- [X] Flags/env: ports, limits, upload dir, log level
+- [X] `/debug/pprof` and optional `expvar`
 
-- [X] Validar `device_id` (formato; opcional registro)
-- [X] `/upload`: permitir solo tipos aceptados
-- [X] Flags/env: puertos, límites, dir uploads, log level
-- [X] `/debug/pprof` y opcional `expvar`
-
-- [X] Makefile/justfile para build/test/run
+- [X] Makefile for build/test/run
 - [X] CI (GitHub Actions): lint, `go test ./...`, build server+cli
 
-- [X] CLI: reconexión exponencial
-- [X] CLI: modo pipe estable (`echo hola | clip-sync --mode send`)
-- [X] CLI: detección simple de mime por extensión
-- [X] CLI: salida limpia y códigos de salida coherentes
+- [X] CLI: exponential reconnection
+- [X] CLI: stable pipe mode (`echo hello | clip-sync --mode send`)
+- [X] CLI: simple MIME detection by extension
+- [X] CLI: clean stderr and consistent exit codes
 
-- [X] Benchmarks ligeros del Hub
-- [X] Fuzzing del envelope JSON (corpus pequeño)
+- [X] Lightweight hub benchmarks
+- [X] Envelope JSON fuzzing (small corpus)
 
-- [X] Documentar protocolo (hello, clip inline, `upload_url`)
-- [X] README de arranque rápido (server + 2 CLI)
-- [X] Colección Postman
-- [X] Changelog v1
+- [X] Protocol docs (hello, inline clip, `upload_url`)
+- [X] Quickstart README (server + 2 clients)
+- [X] Postman collection
+- [X] v1 changelog
 
-- [X] CLI: `watch` monitorea portapapeles y publica por WS
-- [X] CLI: `recv` aplica clips entrantes al portapapeles
-- [X] Clips grandes: subir a `/upload` en `watch` y descargar en `recv`
-- [X] Deduplicación por `msg_id` en server y cliente
-- [X] Binarios para Windows, macOS y Linux (workflow de release)
+- [X] CLI: `watch` monitors clipboard and publishes over WS
+- [X] CLI: `recv` applies incoming clips to clipboard
+- [X] Large clips: upload in `watch`, download in `recv`
+- [X] Dedupe by `msg_id` in server and client
+- [X] Binaries for Windows, macOS and Linux (release workflow)

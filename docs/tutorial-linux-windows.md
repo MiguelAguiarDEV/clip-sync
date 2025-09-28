@@ -1,104 +1,103 @@
-# Notas técnicas: Linux y Windows
+# Technical Notes: Linux and Windows
 
-Audiencia: desarrolladores y recruiters. En esta carpeta no hay guías paso a paso para usuarios finales.
+Audience: developers and recruiters. This folder is not for end‑user step‑by‑step guides.
 
-## Índice
-- [Compilación y cross‑compile](#compilacion-cross)
-- [Ejecución (desarrollo)](#ejecucion-desarrollo)
-- [Flags/env relevantes (server)](#flags-env-server)
-- [Integración con portapapeles](#integracion-portapapeles)
-- [Red y firewall](#red-firewall)
-- [Observabilidad](#observabilidad)
-- [Seguridad](#seguridad)
-- [Modos del CLI](#modos-cli)
-- [Límites y dedupe](#limites-dedupe)
-- [Pruebas y CI](#pruebas-ci)
-- [Troubleshooting (enfoque técnico)](#troubleshooting)
-- [Ver también](#ver-tambien)
+## Table of Contents
+- [Build and Cross‑Compile](#build-cross)
+- [Run (Development)](#run-dev)
+- [Relevant Flags/Env (server)](#flags-env)
+- [Clipboard Integration](#clipboard)
+- [Network and Firewall](#network)
+- [Observability](#observability)
+- [Security](#security)
+- [CLI Modes](#cli-modes)
+- [Limits and Dedupe](#limits-dedupe)
+- [Tests and CI](#tests-ci)
+- [Troubleshooting (technical)](#troubleshooting)
+- [See Also](#see-also)
 
-<a id="compilacion-cross"></a>
-## Compilación y cross‑compile
+<a id="build-cross"></a>
+## Build and Cross‑Compile
 - CLI
   - Linux: `go -C clients/cli build -o ../../bin/cli .`
-  - Windows (desde Linux/macOS): `GOOS=windows GOARCH=amd64 go -C clients/cli build -o ../../bin/cli.exe .`
+  - Windows (from Linux/macOS): `GOOS=windows GOARCH=amd64 go -C clients/cli build -o ../../bin/cli.exe .`
 - Server
   - Linux: `go -C server build -o ../bin/server ./cmd/server`
   - Windows (cross): `GOOS=windows GOARCH=amd64 go -C server build -o ../bin/server.exe ./cmd/server`
 
-Notas:
-- El repo usa `go.work` para un workspace multi‑módulo (`server/`, `clients/cli/`).
-- Preferir `go -C <mod> ...` o `cd` dentro de cada módulo.
+Notes:
+- The repo uses `go.work` for a multi‑module workspace (`server/`, `clients/cli/`).
+- Prefer `go -C <module> ...` or `cd` into each module.
 
-<a id="ejecucion-desarrollo"></a>
-## Ejecución (desarrollo)
+<a id="run-dev"></a>
+## Run (Development)
 - Server (bind all): `go -C server run ./cmd/server --addr :8080`
 - CLI Windows: `.\bin\cli.exe --mode sync --addr ws://<IP>:8080/ws --token u1 --device W1`
 - CLI Linux: `./bin/cli --mode sync --addr ws://<IP>:8080/ws --token u1 --device L1`
 
-<a id="flags-env-server"></a>
-## Flags/env relevantes (server)
-- `--addr` (`CLIPSYNC_ADDR`): por defecto `:8080`.
-- `--upload-dir` (`CLIPSYNC_UPLOAD_DIR`): por defecto `./uploads`.
-- `--upload-max-bytes` (`CLIPSYNC_UPLOAD_MAXBYTES`): por defecto `50 MiB`.
-- `--upload-allowed` (`CLIPSYNC_UPLOAD_ALLOWED`): lista de MIME (ej. `text/plain,image/*`). Vacío desactiva whitelist.
-- `--inline-max-bytes` (`CLIPSYNC_INLINE_MAXBYTES`): por defecto `64 KiB`.
+<a id="flags-env"></a>
+## Relevant Flags/Env (server)
+- `--addr` (`CLIPSYNC_ADDR`): default `:8080`.
+- `--upload-dir` (`CLIPSYNC_UPLOAD_DIR`): default `./uploads`.
+- `--upload-max-bytes` (`CLIPSYNC_UPLOAD_MAXBYTES`): default `50 MiB`.
+- `--upload-allowed` (`CLIPSYNC_UPLOAD_ALLOWED`): MIME list (e.g., `text/plain,image/*`). Empty disables whitelist.
+- `--inline-max-bytes` (`CLIPSYNC_INLINE_MAXBYTES`): default `64 KiB`.
 - `--log-level` (`CLIPSYNC_LOG_LEVEL`): `debug|info|error|off`.
-- `--pprof` (`CLIPSYNC_PPROF`) y `--expvar` (`CLIPSYNC_EXPVAR`): endpoints de debug.
+- `--pprof` (`CLIPSYNC_PPROF`) and `--expvar` (`CLIPSYNC_EXPVAR`): debug endpoints.
 
-<a id="integracion-portapapeles"></a>
-## Integración con portapapeles
-- Implementación en `clients/cli/clipboard.go`:
-  - Windows: usa `clip.exe` si está disponible; si no, PowerShell `Get-Clipboard`/`Set-Clipboard`.
-  - Linux: busca `wl-copy`/`wl-paste` (Wayland), luego `xclip` o `xsel` (X11).
-- Errores comunes: si no hay backend, el CLI devuelve `no clipboard backend found`.
+<a id="clipboard"></a>
+## Clipboard Integration
+- Implementation in `clients/cli/clipboard.go`:
+  - Windows: uses `clip.exe` when available; otherwise PowerShell `Get-Clipboard`/`Set-Clipboard`.
+  - Linux: prefers `wl-copy`/`wl-paste` (Wayland), then `xclip` or `xsel` (X11).
+- Common error: if no backend found, CLI returns `no clipboard backend found`.
 
-<a id="red-firewall"></a>
-## Red y firewall
-- Puerto de servicio: `8080/tcp`.
+<a id="network"></a>
+## Network and Firewall
+- Service port: `8080/tcp`.
 - Windows: `netsh advfirewall firewall add rule name="clip-sync" dir=in action=allow protocol=TCP localport=8080`.
 - Linux (UFW): `sudo ufw allow 8080/tcp`.
 
-<a id="observabilidad"></a>
-## Observabilidad
-- `/health`: `200 ok` simple.
-- `/healthz`: JSON con métricas (clips, drops, conexiones, drops por dispositivo).
-- Opcional: `/debug/pprof/*` y `/debug/vars` (expvar) cuando se habilitan.
+<a id="observability"></a>
+## Observability
+- `/health`: simple `200 ok`.
+- `/healthz`: JSON metrics (clips, drops, connections, per-device drops).
+- Optional: `/debug/pprof/*` and `/debug/vars` (expvar) when enabled.
 
-<a id="seguridad"></a>
-## Seguridad
-- MVP: si `CLIPSYNC_HMAC_SECRET` no está definido, `token == user_id`.
-- HMAC: token `user:exp_unix:hex(hmac_sha256(secret, user|exp))` (validado en server).
-- TLS: usar reverse proxy (Caddy/Nginx) y clientes por `wss://.../ws`.
+<a id="security"></a>
+## Security
+- MVP: if `CLIPSYNC_HMAC_SECRET` is unset, `token == user_id`.
+- HMAC: token `user:exp_unix:hex(hmac_sha256(secret, user|exp))` (validated by server).
+- TLS: use a reverse proxy (Caddy/Nginx) and connect via `wss://.../ws`.
 
-<a id="modos-cli"></a>
-## Modos del CLI
-- `listen`: imprime clips entrantes (debug).
-- `send`: envía `--text`, `--file` o `stdin` (pipe estable). MIME por extensión si no se pasa `--mime`.
-- `recv`: aplica clips `text/*` al portapapeles.
-- `watch`: publica cambios del portapapeles local (`--poll-ms`).
-- `sync`: `watch` + `recv` en un solo proceso.
+<a id="cli-modes"></a>
+## CLI Modes
+- `listen`: print incoming clips (debug).
+- `send`: send `--text`, `--file`, or stdin (stable pipe). MIME by extension if `--mime` is not provided.
+- `recv`: apply incoming `text/*` to clipboard.
+- `watch`: publish local clipboard changes (`--poll-ms`).
+- `sync`: `watch` + `recv` in one process.
 
-<a id="limites-dedupe"></a>
-## Límites y dedupe
-- Inline: `CLIPSYNC_INLINE_MAXBYTES` (64 KiB por defecto).
-- Upload: `CLIPSYNC_UPLOAD_MAXBYTES` (50 MiB por defecto).
-- Dedupe por `msg_id` en server y cliente (LRU configurable por usuario, `CLIPSYNC_DEDUPE`).
+<a id="limits-dedupe"></a>
+## Limits and Dedupe
+- Inline: `CLIPSYNC_INLINE_MAXBYTES` (64 KiB default).
+- Upload: `CLIPSYNC_UPLOAD_MAXBYTES` (50 MiB default).
+- Dedup by `msg_id` on server and client (per-user LRU, `CLIPSYNC_DEDUPE`).
 
-<a id="pruebas-ci"></a>
-## Pruebas y CI
-- Unit/integration tests en `server/tests` y `clients/cli`.
-- GitHub Actions: vet, build, test y smoke del CLI `--help`.
+<a id="tests-ci"></a>
+## Tests and CI
+- Unit/integration tests under `server/tests` and `clients/cli`.
+- GitHub Actions: vet, build, test, and CLI `--help` smoke.
 
 <a id="troubleshooting"></a>
-## Troubleshooting (enfoque técnico)
-- Conexión WS: revisar IP/puerto, y que el cliente use `ws://<IP>:8080/ws`.
-- 415 en `/upload`: MIME no permitido; ajustar `--upload-allowed`.
-- 413 en `/upload`: excede `--upload-max-bytes`.
-- Backends de clipboard ausentes en Linux: instalar `wl-clipboard` (Wayland) o `xclip`/`xsel` (X11).
+## Troubleshooting (technical)
+- WS connection: verify IP/port and that the client uses `ws://<IP>:8080/ws`.
+- 415 on `/upload`: MIME not allowed; adjust `--upload-allowed`.
+- 413 on `/upload`: exceeds `--upload-max-bytes`.
+- Missing clipboard backends on Linux: install `wl-clipboard` (Wayland) or `xclip`/`xsel` (X11).
 
-<a id="ver-tambien"></a>
-## Ver también
-- Protocolo v1: [docs/protocol.md](protocol.md)
-- README (visión general y demo): [../README.md](../README.md)
-
+<a id="see-also"></a>
+## See Also
+- Protocol v1: [protocol.md](protocol.md)
+- README (overview and demo): [../README.md](../README.md)
 

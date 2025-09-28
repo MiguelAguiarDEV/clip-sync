@@ -155,11 +155,11 @@ Auth:
 
 <a id="observability"></a>
 ## Observability
+- `/health`: liveness probe (200 OK).
+- `/healthz`: JSON metrics snapshot.
+- Optional `/debug/pprof/*` and `/debug/vars` (expvar) when enabled.
 
 <a id="see-also"></a>
 ## See also
 - Postman collection: [docs/Clip-Sync.postman_collection.json](Clip-Sync.postman_collection.json)
 - README overview: [../README.md](../README.md)
-
-- `/healthz` JSON metrics.
-- Optional `/debug/pprof/*` and `/debug/vars` (expvar) when enabled.
