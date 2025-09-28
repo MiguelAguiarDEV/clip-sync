@@ -1,6 +1,6 @@
 # Clip‑Sync Protocol v1
 
-This document describes the WebSocket envelope and HTTP side‑channel used by Clip‑Sync v1.
+Audience: developers and recruiters. Wire details for the WebSocket + HTTP flows.
 
 ## Overview
 
@@ -89,6 +89,10 @@ Status codes:
 ### GET /d/{id}
 
 Streams the stored blob with `Content-Type: application/octet-stream`.
+
+### GET /health
+
+Returns `200 ok` for liveness checks.
 
 ### GET /healthz
 

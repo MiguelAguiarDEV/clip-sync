@@ -1,154 +1,74 @@
-# Tutorial: Clip‑Sync en Linux y Windows (misma red)
+# Notas técnicas: Linux y Windows
 
-Este tutorial te guía para usar Clip‑Sync con el servidor hospedado en Linux o en Windows, y clientes en ambos sistemas. Está pensado para un entorno de red local doméstica/oficina.
+Audiencia: desarrolladores y recruiters. En esta carpeta no hay guías paso a paso para usuarios finales.
 
-Requisitos previos
-- Red local: ambos equipos deben poder verse por IP (ej. 192.168.x.y).
-- Puerto 8080 abierto en el host del servidor.
-- Binarios o Go instalado:
-  - Opción A (recomendado): descarga binarios desde la pestaña Releases (server y clip-sync para tu SO/arquitectura).
-  - Opción B: compila desde el código con Go ≥ 1.22.
-- Linux (cliente): necesitas un backend de portapapeles.
-  - Wayland: wl-clipboard (`wl-copy`, `wl-paste`).
-  - X11: xclip o xsel.
-- Windows (cliente): PowerShell viene preinstalado y se usa para el portapapeles.
+## Compilación y cross‑compile
+- CLI
+  - Linux: `go -C clients/cli build -o ../../bin/cli .`
+  - Windows (desde Linux/macOS): `GOOS=windows GOARCH=amd64 go -C clients/cli build -o ../../bin/cli.exe .`
+- Server
+  - Linux: `go -C server build -o ../bin/server ./cmd/server`
+  - Windows (cross): `GOOS=windows GOARCH=amd64 go -C server build -o ../bin/server.exe ./cmd/server`
 
-Variables y flags útiles
-- `--addr` (server): dirección de escucha, por defecto `:8080`.
-- `CLIPSYNC_UPLOAD_ALLOWED` o `--upload-allowed`: whitelist de MIME, por ej. `text/plain,image/*`.
-- `CLIPSYNC_INLINE_MAXBYTES`: tamaño máximo de clip inline (por defecto 64 KiB).
-- `CLIPSYNC_UPLOAD_MAXBYTES`: máximo de `/upload` (por defecto 50 MiB).
-- `CLIPSYNC_LOG_LEVEL`: `debug|info|error|off`.
-- Auth opcional HMAC: `CLIPSYNC_HMAC_SECRET` (ver más abajo).
+Notas:
+- El repo usa `go.work` para un workspace multi‑módulo (`server/`, `clients/cli/`).
+- Preferir `go -C <mod> ...` o `cd` dentro de cada módulo.
 
-## Escenario A — Servidor en Linux
-1) Inicia el servidor
-- Con binario:
-  ```bash
-  ./server-linux-amd64 -addr :8080 --pprof --expvar \
-    --upload-allowed "text/plain,image/*" --inline-max-bytes 65536
-  ```
-- O con Go (desde repo):
-  ```bash
-  go -C server run ./cmd/server
-  ```
-- Abre el puerto en el firewall si usas UFW:
-  ```bash
-  sudo ufw allow 8080/tcp
-  ```
+## Ejecución (desarrollo)
+- Server (bind all): `go -C server run ./cmd/server --addr :8080`
+- CLI Windows: `.\bin\cli.exe --mode sync --addr ws://<IP>:8080/ws --token u1 --device W1`
+- CLI Linux: `./bin/cli --mode sync --addr ws://<IP>:8080/ws --token u1 --device L1`
 
-2) Obtén la IP del servidor Linux
-```bash
-ip a | rg 'inet 192|inet 10'
-# Ejemplo: 192.168.1.50
-```
+## Flags/env relevantes (server)
+- `--addr` (`CLIPSYNC_ADDR`): por defecto `:8080`.
+- `--upload-dir` (`CLIPSYNC_UPLOAD_DIR`): por defecto `./uploads`.
+- `--upload-max-bytes` (`CLIPSYNC_UPLOAD_MAXBYTES`): por defecto `50 MiB`.
+- `--upload-allowed` (`CLIPSYNC_UPLOAD_ALLOWED`): lista de MIME (ej. `text/plain,image/*`). Vacío desactiva whitelist.
+- `--inline-max-bytes` (`CLIPSYNC_INLINE_MAXBYTES`): por defecto `64 KiB`.
+- `--log-level` (`CLIPSYNC_LOG_LEVEL`): `debug|info|error|off`.
+- `--pprof` (`CLIPSYNC_PPROF`) y `--expvar` (`CLIPSYNC_EXPVAR`): endpoints de debug.
 
-3) Cliente Windows (sin instalar nada extra)
-- Descarga `clip-sync-windows-amd64.exe`.
-- Ejecuta en PowerShell:
-  ```powershell
-  .\clip-sync-windows-amd64.exe -addr ws://192.168.1.50:8080/ws -token u1 -device WIN1 -mode sync
-  ```
-  - `-token` puede ser cualquier string en modo MVP. Con HMAC, ver “Auth HMAC”.
-  - `-device` debe cumplir `^[A-Za-z0-9_-]{1,64}$` (ej. WIN1, LNX1).
+## Integración con portapapeles
+- Implementación en `clients/cli/clipboard.go`:
+  - Windows: usa `clip.exe` si está disponible; si no, PowerShell `Get-Clipboard`/`Set-Clipboard`.
+  - Linux: busca `wl-copy`/`wl-paste` (Wayland), luego `xclip` o `xsel` (X11).
+- Errores comunes: si no hay backend, el CLI devuelve `no clipboard backend found`.
 
-4) Cliente Linux
-- Instala backend del portapapeles (Wayland):
-  ```bash
-  sudo apt install wl-clipboard # o equivalente en tu distro
-  ```
-  (X11: `sudo apt install xclip`)
-- Ejecuta:
-  ```bash
-  ./clip-sync-linux-amd64 -addr ws://192.168.1.50:8080/ws -token u1 -device LNX1 -mode sync
-  ```
+## Red y firewall
+- Puerto de servicio: `8080/tcp`.
+- Windows: `netsh advfirewall firewall add rule name="clip-sync" dir=in action=allow protocol=TCP localport=8080`.
+- Linux (UFW): `sudo ufw allow 8080/tcp`.
 
-5) Prueba
-- Copia texto en Windows → debe aparecer en Linux, y viceversa.
-- Clips grandes de texto: el CLI hará upload automático al servidor.
+## Observabilidad
+- `/health`: `200 ok` simple.
+- `/healthz`: JSON con métricas (clips, drops, conexiones, drops por dispositivo).
+- Opcional: `/debug/pprof/*` y `/debug/vars` (expvar) cuando se habilitan.
 
-## Escenario B — Servidor en Windows
-1) Inicia el servidor
-- Con binario:
-  ```powershell
-  .\server-windows-amd64.exe -addr :8080 --upload-allowed "text/plain,image/*"
-  ```
-- Abre el puerto en el firewall (PowerShell admin):
-  ```powershell
-  netsh advfirewall firewall add rule name="ClipSyncServer" dir=in action=allow protocol=TCP localport=8080
-  ```
+## Seguridad
+- MVP: si `CLIPSYNC_HMAC_SECRET` no está definido, `token == user_id`.
+- HMAC: token `user:exp_unix:hex(hmac_sha256(secret, user|exp))` (validado en server).
+- TLS: usar reverse proxy (Caddy/Nginx) y clientes por `wss://.../ws`.
 
-2) Obtén la IP de Windows
-```powershell
-ipconfig | findstr IPv4
-# Ejemplo: 192.168.1.60
-```
+## Modos del CLI
+- `listen`: imprime clips entrantes (debug).
+- `send`: envía `--text`, `--file` o `stdin` (pipe estable). MIME por extensión si no se pasa `--mime`.
+- `recv`: aplica clips `text/*` al portapapeles.
+- `watch`: publica cambios del portapapeles local (`--poll-ms`).
+- `sync`: `watch` + `recv` en un solo proceso.
 
-3) Cliente Linux
-```bash
-./clip-sync-linux-amd64 -addr ws://192.168.1.60:8080/ws -token u1 -device LNX1 -mode sync
-```
+## Límites y dedupe
+- Inline: `CLIPSYNC_INLINE_MAXBYTES` (64 KiB por defecto).
+- Upload: `CLIPSYNC_UPLOAD_MAXBYTES` (50 MiB por defecto).
+- Dedupe por `msg_id` en server y cliente (LRU configurable por usuario, `CLIPSYNC_DEDUPE`).
 
-4) Cliente Windows
-```powershell
-.\clip-sync-windows-amd64.exe -addr ws://192.168.1.60:8080/ws -token u1 -device WIN1 -mode sync
-```
+## Pruebas y CI
+- Unit/integration tests en `server/tests` y `clients/cli`.
+- GitHub Actions: vet, build, test y smoke del CLI `--help`.
 
-## Auth HMAC opcional (recomendado en redes compartidas)
-1) Define un secreto en el servidor (Linux/Windows):
-```bash
-export CLIPSYNC_HMAC_SECRET=mi_super_secreto
-# Windows (PowerShell): $env:CLIPSYNC_HMAC_SECRET = "mi_super_secreto"
-```
-2) Genera un token con expiración (ej. +1h)
-- Linux/macOS (bash + openssl):
-  ```bash
-  uid="u1"; exp=$(date -d "+1 hour" +%s); secret="mi_super_secreto"
-  mac=$(printf "%s|%s" "$uid" "$exp" | openssl dgst -sha256 -hmac "$secret" -binary | xxd -p -c 256)
-  echo "$uid:$exp:$mac"
-  ```
-- Windows (PowerShell):
-  ```powershell
-  $uid = "u1"; $exp = [int][double]::Parse((Get-Date).ToUniversalTime().AddHours(1).Subtract([datetime]'1970-01-01').TotalSeconds)
-  $secret = "mi_super_secreto"
-  $payload = "$uid|$exp"
-  $hmac = [System.BitConverter]::ToString((New-Object System.Security.Cryptography.HMACSHA256 ([Text.Encoding]::UTF8.GetBytes($secret))).ComputeHash([Text.Encoding]::UTF8.GetBytes($payload))).Replace("-", "").ToLower()
-  "$uid:$exp:$hmac"
-  ```
-3) Usa ese token en los clientes (`-token`), y deja definido el `CLIPSYNC_HMAC_SECRET` en el entorno del servidor.
+## Troubleshooting (enfoque técnico)
+- Conexión WS: revisar IP/puerto, y que el cliente use `ws://<IP>:8080/ws`.
+- 415 en `/upload`: MIME no permitido; ajustar `--upload-allowed`.
+- 413 en `/upload`: excede `--upload-max-bytes`.
+- Backends de clipboard ausentes en Linux: instalar `wl-clipboard` (Wayland) o `xclip`/`xsel` (X11).
 
-## Consejos de uso del CLI
-- Modos:
-  - `sync`: recomendado; combina recv + watch.
-  - `recv`: solo aplica clips entrantes al portapapeles.
-  - `watch`: solo publica cuando tu portapapeles cambia.
-- Detección de MIME por extensión al enviar `--file`.
-- Pipe estable: `echo hola | ./clip-sync -mode send`.
-- Códigos de salida: uso=2, conexión=10, upload=11, envío=12.
-
-## Solución de problemas
-- “connect failed”: verifica la IP del servidor, el puerto 8080/tcp en el firewall y que usas `ws://IP:8080/ws` (no `localhost` desde otra máquina).
-- “no clipboard backend found” (Linux): instala `wl-clipboard` (Wayland) o `xclip`/`xsel` (X11).
-- “unsupported media type” en `/upload`: revisa `CLIPSYNC_UPLOAD_ALLOWED`. Para pruebas, `text/plain,image/*` suele ser suficiente.
-- `device_id` inválido: usa alfanumérico, `_` o `-` (máx. 64 chars), por ejemplo `WIN1` o `LNX1`.
-- “payload too large”: ajusta `--inline-max-bytes` para inline y `--upload-max-bytes` para `/upload`.
-
-## (Avanzado) Ejecutar como servicio
-- Linux systemd (servidor)
-  ```ini
-  [Unit]
-  Description=Clip‑Sync Server
-  After=network.target
-
-  [Service]
-  ExecStart=/usr/local/bin/server -addr :8080
-  Environment=CLIPSYNC_UPLOAD_ALLOWED=text/plain,image/*
-  Restart=on-failure
-
-  [Install]
-  WantedBy=multi-user.target
-  ```
-- Windows: crear una Tarea Programada que ejecute el binario al iniciar sesión, o usar NSSM para instalar como servicio.
-
-¡Listo! Con esto puedes sincronizar texto entre tu Windows y tu Linux en la misma red.
 
