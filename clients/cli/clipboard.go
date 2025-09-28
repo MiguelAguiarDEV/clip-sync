@@ -8,6 +8,18 @@ import (
     "runtime"
 )
 
+// clipboardWriteBackend returns the backend name that will be used to write clipboard.
+func clipboardWriteBackend() string {
+    if runtime.GOOS == "windows" {
+        if _, err := exec.LookPath("clip.exe"); err == nil { return "clip.exe" }
+        return "powershell"
+    }
+    if _, err := exec.LookPath("wl-copy"); err == nil { return "wl-copy" }
+    if _, err := exec.LookPath("xclip"); err == nil { return "xclip" }
+    if _, err := exec.LookPath("xsel"); err == nil { return "xsel" }
+    return ""
+}
+
 func getClipboardText() (string, error) {
     if runtime.GOOS == "windows" {
         // Prefer Windows PowerShell; -Raw keeps text as-is.

@@ -1,19 +1,19 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"flag"
-	"fmt"
-	"io"
-	"mime"
-	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
-	"unicode/utf8"
-	"time"
+    "context"
+    "encoding/json"
+    "flag"
+    "fmt"
+    "io"
+    "mime"
+    "net/http"
+    "os"
+    "path/filepath"
+    "strings"
+    "sync"
+    "unicode/utf8"
+    "time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -134,7 +134,7 @@ func runListen(ctx context.Context, c *websocket.Conn) error {
 }
 
 // runRecvApply listens and applies incoming text clips to the OS clipboard.
-func runRecvApply(ctx context.Context, c *websocket.Conn, wsAddr string, markRemote func(hash string)) error {
+func runRecvApply(ctx context.Context, c *websocket.Conn, wsAddr string, markRemote func(hash string), verbose bool) error {
     base := httpBaseFromWS(wsAddr)
     dd := newDD(512)
     for {
@@ -170,21 +170,38 @@ func runRecvApply(ctx context.Context, c *websocket.Conn, wsAddr string, markRem
             if len(data) == 0 {
                 continue
             }
+            if verbose {
+                fmt.Printf("[recv] applying to clipboard: from=%s bytes=%d backend=%s\n", env.From, len(data), clipboardWriteBackend())
+            }
             if err := setClipboardText(string(data)); err != nil {
                 fmt.Fprintln(os.Stderr, "set clipboard failed:", err)
                 continue
             }
             markRemote(hashBytes(data))
-            fmt.Println("clipboard updated from", env.From)
+            if verbose {
+                // read-back validation
+                if rb, err := getClipboardText(); err == nil {
+                    ok := rb == string(data)
+                    prev := rb
+                    if len(prev) > 80 { prev = prev[:80] + "…" }
+                    fmt.Printf("[recv] clipboard updated from %s, verify=%v len=%d preview=%q\n", env.From, ok, len(rb), prev)
+                } else {
+                    fmt.Printf("[recv] clipboard updated from %s (unable to read back: %v)\n", env.From, err)
+                }
+            } else {
+                fmt.Println("clipboard updated from", env.From)
+            }
         } else {
             // non-text: skip for v1
-            fmt.Printf("[from %s] non-text clip: %s (%d bytes)\n", env.From, cl.Mime, cl.Size)
+            if verbose {
+                fmt.Printf("[recv] skipping non-text from %s: mime=%s bytes=%d\n", env.From, cl.Mime, cl.Size)
+            }
         }
     }
 }
 
 // runWatchLoop polls the clipboard and sends updates. Uses lastRemote to avoid echo.
-func runWatchLoop(ctx context.Context, c *websocket.Conn, wsAddr string, interval time.Duration, lastRemote func() string, clearRemote func()) error {
+func runWatchLoop(ctx context.Context, c *websocket.Conn, wsAddr string, interval time.Duration, lastRemote func() string, clearRemote func(), verbose bool) error {
     ticker := time.NewTicker(interval)
     defer ticker.Stop()
     var lastLocal string
@@ -210,6 +227,11 @@ func runWatchLoop(ctx context.Context, c *websocket.Conn, wsAddr string, interva
             if len(data) <= types.MaxInlineBytes {
                 // stable msg_id for dedupe across devices
                 msgID := "h-" + hashString(txt)
+                if verbose {
+                    prev := txt
+                    if len(prev) > 80 { prev = prev[:80] + "…" }
+                    fmt.Printf("[watch] sending inline bytes=%d hash=%s preview=%q\n", len(data), msgID, prev)
+                }
                 if err := runSendTextWithMsgID(ctx, c, txt, msgID); err != nil {
                     fmt.Fprintln(os.Stderr, "send text failed:", err)
                     continue
@@ -221,6 +243,9 @@ func runWatchLoop(ctx context.Context, c *websocket.Conn, wsAddr string, interva
                 _, _ = tmp.Write(data)
                 _ = tmp.Close()
                 msgID := "h-" + hashString(txt)
+                if verbose {
+                    fmt.Printf("[watch] sending large via upload bytes=%d hash=%s tmp=%s\n", len(data), msgID, tmpPath)
+                }
                 if err := runSendFileWithMsgID(ctx, c, wsAddr, tmpPath, "text/plain", msgID); err != nil {
                     fmt.Fprintln(os.Stderr, "send file failed:", err)
                 }
@@ -322,14 +347,15 @@ func runSendFileWithMsgID(ctx context.Context, c *websocket.Conn, wsAddr, path, 
 /* ---------- main ---------- */
 
 func main() {
-	addr := flag.String("addr", "ws://localhost:8080/ws", "WebSocket endpoint")
-	token := flag.String("token", "u1", "user token (MVP: token == userID)")
-	device := flag.String("device", "A", "device id (unique per device)")
+    addr := flag.String("addr", "ws://localhost:8080/ws", "WebSocket endpoint")
+    token := flag.String("token", "u1", "user token (MVP: token == userID)")
+    device := flag.String("device", "A", "device id (unique per device)")
     mode := flag.String("mode", "listen", "listen|send|recv|watch|sync")
     text := flag.String("text", "", "text to send (send mode). If empty, read from stdin")
     file := flag.String("file", "", "path to file to send (uses HTTP /upload)")
     mime := flag.String("mime", "", "mime type for --file (auto-detect if empty)")
     poll := flag.Int("poll-ms", 400, "clipboard poll interval for watch/sync")
+    verbose := flag.Bool("v", false, "verbose logging (debug)")
     flag.Parse()
 
 	switch *mode {
@@ -426,7 +452,7 @@ func main() {
             defer c.Close(websocket.StatusNormalClosure, "")
             // recv-only does not need local echo prevention state
             mark := func(string){}
-            if err := runRecvApply(context.Background(), c, *addr, mark); err != nil {
+            if err := runRecvApply(context.Background(), c, *addr, mark, *verbose); err != nil {
                 fatalf(exitSend, "%v", err)
             }
         case "watch":
@@ -446,7 +472,7 @@ func main() {
             lr := ""
             getLR := func() string { mu.Lock(); defer mu.Unlock(); return lr }
             clearLR := func(){ mu.Lock(); lr = ""; mu.Unlock() }
-            if err := runWatchLoop(context.Background(), c, *addr, time.Duration(*poll)*time.Millisecond, getLR, clearLR); err != nil {
+            if err := runWatchLoop(context.Background(), c, *addr, time.Duration(*poll)*time.Millisecond, getLR, clearLR, *verbose); err != nil {
                 fatalf(exitSend, "%v", err)
             }
         case "sync":
@@ -468,8 +494,8 @@ func main() {
             clearLR := func(){ mu.Lock(); lr = ""; mu.Unlock() }
             mark := func(h string){ mu.Lock(); lr = h; mu.Unlock() }
             ctx := context.Background()
-            go func(){ _ = runRecvApply(ctx, c, *addr, mark) }()
-            if err := runWatchLoop(ctx, c, *addr, time.Duration(*poll)*time.Millisecond, getLR, clearLR); err != nil {
+            go func(){ _ = runRecvApply(ctx, c, *addr, mark, *verbose) }()
+            if err := runWatchLoop(ctx, c, *addr, time.Duration(*poll)*time.Millisecond, getLR, clearLR, *verbose); err != nil {
                 fatalf(exitSend, "%v", err)
             }
         default:
