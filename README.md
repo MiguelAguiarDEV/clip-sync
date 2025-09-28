@@ -2,8 +2,6 @@
 
 Sincroniza tu portapapeles entre dispositivos (Windows/Linux). Server en Go + CLI. WebSocket para señalización y HTTP para cargas grandes.
 
-![Demo](demos/clip-sync-demo.gif)
-
 ## Índice
 - [Introducción](#introduccion)
 - [Demo](#demo)
@@ -25,7 +23,7 @@ Clip‑Sync permite compartir texto entre dispositivos en la misma red o a trav�
 
 <a id="demo"></a>
 ## Demo
-Arriba puedes ver un ejemplo de sincronización en tiempo real entre Windows y Linux.
+![Demo](demos/clip-sync-demo.gif)
 
 <a id="inicio-rapido"></a>
 ## Inicio Rápido
