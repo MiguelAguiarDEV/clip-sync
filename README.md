@@ -90,18 +90,6 @@ echo "hola" | ./bin/cli --mode send --addr ws://<SERVER_IP>:8080/ws --token u1 -
 ./bin/cli --mode send --file ./foto.png --mime image/png --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1
 ```
 
-<a id="releases"></a>
-## Releases
-- Tags `v*` (ej. `v0.1.0`) disparan el workflow de publicación y adjuntan binarios para Linux/Windows/macOS (amd64/arm64):
-  - `server_<GOOS>_<GOARCH>[.exe]`
-  - `cli_<GOOS>_<GOARCH>[.exe]`
-- Cómo crear un release:
-  - `git tag v0.1.0 && git push origin v0.1.0`
-  - Revisa la pestaña “Releases” para descargar activos.
-- Instalación rápida (ejemplos):
-  - Linux: `chmod +x cli_linux_amd64 && sudo mv cli_linux_amd64 /usr/local/bin/clip-sync`
-  - Windows: renombra `cli_windows_amd64.exe` a `cli.exe` y colócalo en una carpeta del `PATH`.
-
 <a id="configuracion"></a>
 ## Configuración
 - `--addr` (`CLIPSYNC_ADDR`): dirección de escucha del server (por defecto `:8080`).
