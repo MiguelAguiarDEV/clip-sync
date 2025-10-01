@@ -50,3 +50,9 @@
 - [X] Large clips: upload in `watch`, download in `recv`
 - [X] Dedupe by `msg_id` in server and client
 - [X] Binaries for Windows, macOS and Linux (release workflow)
+
+## Future Enhancements
+
+- [ ] Auto-configure server with default settings
+- [ ] Display local network IP + port on server startup for easy client connection
+- [ ] Graphical user interface (GUI) for server and client
