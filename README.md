@@ -34,19 +34,20 @@ Clip-Sync is a lightweight CLI to sync your clipboard across Windows and Linux, 
 
 ## Quick Start
 
-Requirements:
-
-* Go 1.22+ and Git, or use prebuilt binaries.
+**Requirements:**
+* Prebuilt binaries (see [Releases](#releases)), or Go 1.22+ to build from source.
 * TCP port `8080` reachable from clients.
 
 <a id="server-on-windows"></a>
 
 ### Server on Windows
 
+**Option 1: Using prebuilt binary (recommended)**
+
 1) Run the server (PowerShell):
 
 ```powershell
-go -C server run ./cmd/server --addr :8080
+.\dist\server_windows_amd64.exe --addr :8080
 ```
 
 2) Open the firewall (admin):
@@ -55,14 +56,23 @@ go -C server run ./cmd/server --addr :8080
 netsh advfirewall firewall add rule name="clip-sync" dir=in action=allow protocol=TCP localport=8080
 ```
 
+**Option 2: Building from source**
+
+```powershell
+go -C server run ./cmd/server --addr :8080
+```
+
 <a id="server-on-linux"></a>
 
 ### Server on Linux
 
+**Option 1: Using prebuilt binary (recommended)**
+
 1) Run the server:
 
 ```bash
-go -C server run ./cmd/server --addr 0.0.0.0:8080
+chmod +x ./dist/server_linux_amd64
+./dist/server_linux_amd64 --addr 0.0.0.0:8080
 ```
 
 2) Open the port (UFW or equivalent):
@@ -71,63 +81,82 @@ go -C server run ./cmd/server --addr 0.0.0.0:8080
 sudo ufw allow 8080/tcp
 ```
 
+**Option 2: Building from source**
+
+```bash
+go -C server run ./cmd/server --addr 0.0.0.0:8080
+```
+
 <a id="clients"></a>
 
 ## Clients
 
-Use the same `--token` for devices of the same user and a unique `--device` per machine.
+**Important:** Use the same `--token` for all devices of the same user, and a unique `--device` ID per machine.
+
+> **Note:** Replace `<SERVER_IP>` with your server's IP address (e.g., `192.168.1.100` for LAN or your public IP for Internet).
 
 <a id="windows"></a>
 
 ### Windows
 
-* Bidirectional sync with verbose logs:
+**Bidirectional sync** (recommended for most users):
 
 ```powershell
-.\bin\cli.exe --mode sync --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1 -v
+.\dist\cli_windows_amd64.exe --mode sync --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1 -v
 ```
 
-* Receive only and apply to clipboard:
+**Receive only** (apply incoming clipboard changes):
 
 ```powershell
-.\bin\cli.exe --mode recv --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1 -v
+.\dist\cli_windows_amd64.exe --mode recv --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1 -v
 ```
 
-* One‑shot send (text or file):
+**One-shot send** (text or file):
 
 ```powershell
-.\bin\cli.exe --mode send --text "hello" --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1
-.\bin\cli.exe --mode send --file .\photo.png --mime image/png --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1
+# Send text
+.\dist\cli_windows_amd64.exe --mode send --text "hello" --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1
+
+# Send file
+.\dist\cli_windows_amd64.exe --mode send --file .\photo.png --mime image/png --addr ws://<SERVER_IP>:8080/ws --token u1 --device W1
 ```
 
 <a id="linux"></a>
 
 ### Linux
 
-* Bidirectional sync with verbose logs:
+**Bidirectional sync** (recommended for most users):
 
 ```bash
-./bin/cli --mode sync --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1 -v
+chmod +x ./dist/cli_linux_amd64
+./dist/cli_linux_amd64 --mode sync --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1 -v
 ```
 
-* Receive only and apply to clipboard:
+**Receive only** (apply incoming clipboard changes):
 
 ```bash
-./bin/cli --mode recv --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1 -v
+./dist/cli_linux_amd64 --mode recv --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1 -v
 ```
 
-* One‑shot send (text or file):
+**One-shot send** (text or file):
 
 ```bash
-echo "hello" | ./bin/cli --mode send --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1
-./bin/cli --mode send --file ./photo.png --mime image/png --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1
+# Send text from stdin
+echo "hello" | ./dist/cli_linux_amd64 --mode send --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1
+
+# Send file
+./dist/cli_linux_amd64 --mode send --file ./photo.png --mime image/png --addr ws://<SERVER_IP>:8080/ws --token u1 --device L1
 ```
 
 <a id="releases"></a>
 
 ## Releases
 
-Prebuilt artifacts are published under **Releases**. Verify checksums when provided. You can also build locally using `make dist` or the scripts under `scripts/`.
+Prebuilt binaries for Windows and Linux are available in the [`dist/`](dist/) directory:
+* **Windows:** `dist/server_windows_amd64.exe` and `dist/cli_windows_amd64.exe`
+* **Linux:** `dist/server_linux_amd64` and `dist/cli_linux_amd64`
+
+You can also build locally from source using `make dist` or the scripts under [`scripts/`](scripts/).
 
 <a id="configuration"></a>
 
